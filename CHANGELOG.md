@@ -56,3 +56,18 @@ txids and outpoints the wallet does not own are ignored, not errors.
 
 **Migration:** none required; existing calls keep their behaviour. Replace
 "discard and retry lower" loops with one call that passes the protected coins.
+
+### Confirmed-only preparations are re-checked at submit
+
+A board or onchain send prepared with `confirmedOnly: true` now requires every
+parent transaction to still be confirmed at the chain source on first submit.
+If a reorg returned a parent to the mempool, `submitPreparedBoard` and
+`broadcastPrepared` throw `PreparedInputsUnavailable` and nothing is recorded
+or broadcast. The preparation stays usable: submit again once the parent
+re-confirms, or discard it. If the chain source is unreachable, that first
+submit throws instead of recording the transaction and returning `failed`.
+Retrying a send that was already recorded skips the check, so rebroadcast
+keeps working.
+
+**Migration:** none in the API; handle `PreparedInputsUnavailable` from submit
+as "inputs changed, prepare again or wait".

@@ -105,6 +105,8 @@ pub(crate) struct Prepared {
     pub psbt: Psbt,
     pub board: Option<super::prepared_board::BoardPreparation>,
     pub recorded: bool,
+    /// Submit re-checks that every parent is still confirmed (a reorg can undo it).
+    pub confirmed_only: bool,
 }
 
 /// The daemon and every SDK handle share both BDK and these reservations.
@@ -375,6 +377,7 @@ impl WalletState {
                 psbt,
                 board: None,
                 recorded: false,
+                confirmed_only,
             },
         );
         Ok(result)

@@ -302,7 +302,12 @@ struct ReorgNode {
 }
 impl ReorgNode {
     fn start() -> Self {
-        let name = format!("bark-bolt-ffi-reorg-{}", std::process::id());
+        static NEXT: std::sync::atomic::AtomicU32 = std::sync::atomic::AtomicU32::new(0);
+        let name = format!(
+            "bark-bolt-ffi-reorg-{}-{}",
+            std::process::id(),
+            NEXT.fetch_add(1, std::sync::atomic::Ordering::Relaxed)
+        );
         let output=std::process::Command::new("docker").args(["run","--rm","-d","--name",&name,"-p","127.0.0.1::18443",
             "bitcoin/bitcoin@sha256:da25cedc66b1daefff9f412ee196c901a899c3fa68a33b20849c3e08b5c40d63",
             "-regtest","-server","-txindex","-blockfilterindex","-rpcbind=0.0.0.0","-rpcallowip=0.0.0.0/0","-rpcuser=second","-rpcpassword=ark","-fallbackfee=0.00001"]).output().unwrap();
@@ -587,5 +592,148 @@ fn live_prepared_board_never_spends_excluded_outpoints() {
                 .code,
             BarkErrorCode::InsufficientFunds
         );
+    });
+}
+
+/// Fund one coin on a disposable node, then let `check` prepare, reorg the
+/// funding block back into the mempool and submit.
+fn with_unconfirmed_funding_after_reorg<F>(check: F)
+where
+    F: for<'a> FnOnce(
+        &'a ReorgNode,
+        &'a Wallet,
+        &'a OnchainWallet,
+        Box<dyn FnOnce() + 'a>,
+    ) -> std::pin::Pin<Box<dyn std::future::Future<Output = ()> + 'a>>,
+{
+    let node = ReorgNode::start();
+    let mut config = config();
+    config.bitcoind_address = Some(format!("http://127.0.0.1:{}", node.port));
+    tokio::runtime::Runtime::new().unwrap().block_on(async {
+        let directory = tempfile::tempdir().unwrap();
+        let mnemonic = generate_mnemonic().unwrap();
+        let onchain = OnchainWallet::default(
+            Network::Regtest,
+            mnemonic.clone(),
+            config.clone(),
+            directory.path().to_str().unwrap().into(),
+        )
+        .await
+        .unwrap();
+        let wallet = Wallet::open_with_onchain(
+            Network::Regtest,
+            mnemonic,
+            config,
+            args(directory.path()),
+            &onchain,
+        )
+        .await
+        .unwrap();
+        let address = onchain.new_address().await.unwrap();
+        node.rpc(&["sendtoaddress", &address, "0.005"]);
+        node.mine(1);
+        let funding_height: u32 = node.rpc(&["getblockcount"]).parse().unwrap();
+        node.mine(5);
+        onchain.sync().await.unwrap();
+        let node_ref = &node;
+        let reorg = Box::new(move || {
+            // Disconnecting the funding block returns its transaction to the mempool.
+            let hash = node_ref.rpc(&["getblockhash", &funding_height.to_string()]);
+            node_ref.rpc(&["invalidateblock", &hash]);
+            // A longer chain that leaves the funding transaction unconfirmed.
+            let miner = node_ref.rpc(&["getnewaddress"]);
+            for _ in 0..7 {
+                node_ref.rpc(&["generateblock", &miner, "[]"]);
+            }
+            let raw: serde_json::Value =
+                serde_json::from_str(&node_ref.rpc(&["getrawmempool"])).unwrap();
+            assert_eq!(raw.as_array().unwrap().len(), 1);
+        });
+        check(&node, &wallet, &onchain, reorg).await;
+    });
+}
+
+#[test]
+fn live_confirmed_only_board_rejects_parent_reorged_to_mempool() {
+    if std::env::var("BARK_REGTEST").as_deref() != Ok("1") {
+        return;
+    }
+    with_unconfirmed_funding_after_reorg(|_, wallet, _, reorg| {
+        Box::pin(async move {
+            let preview = wallet
+                .prepare_board(OnchainSendAmount::DrainAll, 1, true, None)
+                .await
+                .unwrap();
+            reorg();
+            let error = wallet
+                .submit_prepared_board(preview.id.clone())
+                .await
+                .unwrap_err();
+            assert_eq!(
+                error.code,
+                BarkErrorCode::PreparedInputsUnavailable,
+                "{error:?}"
+            );
+            assert!(wallet.pending_boards().await.unwrap().is_empty());
+            assert!(wallet.history().await.unwrap().is_empty());
+            wallet.discard_prepared_board(preview.id).await.unwrap();
+        })
+    });
+}
+
+#[test]
+fn live_confirmed_only_send_rejects_parent_reorged_to_mempool() {
+    if std::env::var("BARK_REGTEST").as_deref() != Ok("1") {
+        return;
+    }
+    with_unconfirmed_funding_after_reorg(|node, _, onchain, reorg| {
+        Box::pin(async move {
+            let destination = node.rpc(&["getnewaddress"]);
+            let prepared = onchain
+                .prepare_send(destination, OnchainSendAmount::DrainAll, 1, true)
+                .await
+                .unwrap();
+            reorg();
+            let error = onchain
+                .broadcast_prepared(prepared.id.clone())
+                .await
+                .unwrap_err();
+            assert_eq!(
+                error.code,
+                BarkErrorCode::PreparedInputsUnavailable,
+                "{error:?}"
+            );
+            assert!(onchain
+                .transactions()
+                .await
+                .unwrap()
+                .iter()
+                .all(|tx| tx.txid != prepared.txid));
+            // The refusal is a re-check, not a consumed preparation: re-confirming the parent lets it through.
+            node.mine(1);
+            let sent = onchain
+                .broadcast_prepared(prepared.id.clone())
+                .await
+                .unwrap();
+            assert!(
+                matches!(sent.broadcast, BroadcastOutcome::Accepted),
+                "{:?}",
+                sent.broadcast
+            );
+            // A second reorg after submission plus a local eviction must not block rebroadcast.
+            node.rpc(&["invalidateblock", &node.rpc(&["getbestblockhash"])]);
+            onchain.evict_tx(prepared.txid.clone()).await.unwrap();
+            onchain
+                .broadcast_prepared(prepared.id.clone())
+                .await
+                .unwrap();
+            assert!(onchain
+                .transactions()
+                .await
+                .unwrap()
+                .iter()
+                .any(|tx| tx.txid == prepared.txid));
+            onchain.discard_prepared(prepared.id).await.unwrap();
+        })
     });
 }

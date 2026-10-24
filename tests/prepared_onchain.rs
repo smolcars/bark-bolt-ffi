@@ -94,11 +94,28 @@ fn failed_broadcast_retry_cannot_spend_newly_reserved_inputs() {
         regtest(&["send-to", &address, "0.001"]);
         onchain.sync().await.unwrap();
         let destination = regtest(&["bcli", "getnewaddress"]);
-        let old = onchain
+        let unverifiable = onchain
             .prepare_send(destination.clone(), OnchainSendAmount::DrainAll, 10, true)
             .await
             .unwrap();
         proxy.stop();
+        // Confirmed-only cannot be re-checked without the chain source: refuse, record nothing.
+        onchain
+            .broadcast_prepared(unverifiable.id.clone())
+            .await
+            .unwrap_err();
+        assert!(onchain
+            .transactions()
+            .await
+            .unwrap()
+            .iter()
+            .all(|tx| tx.txid != unverifiable.txid));
+        onchain.discard_prepared(unverifiable.id).await.unwrap();
+        // The reservation checks below need a broadcast that is attempted and fails.
+        let old = onchain
+            .prepare_send(destination.clone(), OnchainSendAmount::DrainAll, 10, false)
+            .await
+            .unwrap();
         assert!(matches!(
             onchain
                 .broadcast_prepared(old.id.clone())
@@ -110,7 +127,7 @@ fn failed_broadcast_retry_cannot_spend_newly_reserved_inputs() {
         // The proxy was stopped before submission; the node has never received this tx.
         onchain.evict_tx(old.txid.clone()).await.unwrap();
         let new = onchain
-            .prepare_send(destination, OnchainSendAmount::DrainAll, 10, true)
+            .prepare_send(destination, OnchainSendAmount::DrainAll, 10, false)
             .await
             .unwrap();
         assert_eq!(old.inputs, new.inputs);

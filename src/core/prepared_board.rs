@@ -168,7 +168,7 @@ impl Wallet {
     pub async fn submit_prepared_board(&self, id: String) -> Result<types::BoardResult, BarkError> {
         let onchain = self.inner.onchain().ok_or_else(unsupported)?;
         let _operation = super::prepared_onchain::operation_guard(Some(onchain.clone())).await;
-        let (transaction, psbt, board, cache_recorded) = {
+        let (transaction, psbt, board, cache_recorded, confirmed_only) = {
             let mut guard = onchain.write().await;
             let state = (&mut *guard as &mut dyn std::any::Any)
                 .downcast_mut::<WalletState>()
@@ -210,6 +210,7 @@ impl Wallet {
                 entry.psbt.clone(),
                 board,
                 entry.recorded,
+                entry.confirmed_only,
             )
         };
         // Check the chain as well as the local graph: another wallet can spend an
@@ -245,16 +246,22 @@ impl Wallet {
             bark_bitcoin_ext::TxStatus::NotFound
         ) {
             for input in &transaction.input {
-                match self
+                let status = self
                     .inner
                     .chain()
                     .tx_status(input.previous_output.txid)
-                    .await?
-                {
+                    .await?;
+                match status {
                     bark_bitcoin_ext::TxStatus::NotFound => {
                         return Err(unavailable(
                             "prepared board parent transaction is no longer on the chain source",
                         ))
+                    }
+                    _ if confirmed_only
+                        && board.submitted.is_none()
+                        && !matches!(status, bark_bitcoin_ext::TxStatus::Confirmed(_)) =>
+                    {
+                        return Err(unavailable("prepared board parent is no longer confirmed"))
                     }
                     bark_bitcoin_ext::TxStatus::Confirmed(_)
                         if self

@@ -164,6 +164,7 @@ impl OnchainWallet {
         }
         let transaction = prepared.transaction.clone();
         let was_recorded = prepared.recorded;
+        let prepared_confirmed_only = prepared.confirmed_only;
         let txid = transaction.compute_txid().to_string();
         let reserved_elsewhere = transaction
             .input
@@ -198,6 +199,18 @@ impl OnchainWallet {
                     BarkErrorCode::PreparedInputsUnavailable,
                     "prepared inputs are no longer unspent; discard and prepare again",
                 ));
+            }
+            // Only the first submission: an evicted, already-recorded tx must stay rebroadcastable.
+            if prepared_confirmed_only && !was_recorded {
+                for input in &transaction.input {
+                    let status = self.chain.tx_status(input.previous_output.txid).await?;
+                    if !matches!(status, bark_bitcoin_ext::TxStatus::Confirmed(_)) {
+                        return Err(BarkError::typed(
+                            BarkErrorCode::PreparedInputsUnavailable,
+                            "prepared input parent is no longer confirmed; discard and prepare again",
+                        ));
+                    }
+                }
             }
             if let Err(error) = state.record_prepared(&transaction).await {
                 return Ok(types::BroadcastResult {
