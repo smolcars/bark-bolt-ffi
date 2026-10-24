@@ -31,7 +31,7 @@ BOLTFFI="$PWD/target/tools/boltffi" scripts/build-sdk.sh android --release
 ./gradlew :sdk:android:publishToMavenLocal :sdk:jvm:publishToMavenLocal
 ```
 
-Use `mavenLocal()` with `io.github.niteshbalusu11:bark-bolt-ffi-android:0.6.0`,
+Use `mavenLocal()` with `io.github.niteshbalusu11:bark-bolt-ffi-android:0.7.0`,
 or the host-specific `bark-bolt-ffi-jvm-darwin-arm64` / `bark-bolt-ffi-jvm-linux-x86_64`
 artifact. Import `io.github.niteshbalusu11.bark.*`. The Maven POM supplies the
 coroutines dependency. The Android AAR embeds all three JNI ABIs and consumer
@@ -465,3 +465,35 @@ starts in the last moments of a round's submit window joins that round. When
 the server closes the round empty, the call fails with `round N failed by
 server`. Nothing is spent; retry the refresh. Apps that open a wallet and
 refresh immediately hit this more often.
+
+## Noah exit, board and preparation fixes (v0.7.0)
+
+Unreleased: install instructions above move to 0.7.0 once it is published.
+Bark stays at lib-0.8.0; databases open unchanged. Full notes, with a
+migration step per change, are in [the changelog](../CHANGELOG.md); the plan is
+[here](plans/26-noah-ffi-fixes.md).
+
+Breaking changes:
+
+- Exit calls classify Bark's `ExitError`: 13 new `BarkErrorCode.exit*` cases
+  split never-exitable VTXOs (`exitNonStandardVtxo`, `exitDustLimit`,
+  `exitVtxoAlreadySpent`, `exitVtxoAlreadyExited`, `exitVtxoSwept`,
+  `exitUnknownVtxo`, `exitCyclicTransactions`, `exitMissingAnchorOutput`) from
+  chain-source failures worth retrying (`exitTransactionRetrievalFailure`,
+  `exitTipRetrievalFailure`, `exitBlockRetrievalFailure`,
+  `exitAncestorRetrievalFailure`) and `exitInsufficientConfirmedFunds`.
+  `BarkError` adds optional `vtxoId`, `neededSats` and `availableSats`.
+  `ExitProgressStatus.error` is now `BarkError?` instead of `String?`.
+- `EmergencyExitFeeEstimate.excludedVtxos: [ExcludedExitVtxo]` lists VTXOs a
+  whole-wallet estimate skipped because Bark would not exit them.
+- `BroadcastOutcome.uncertain(reason:)`: a board submit failed after Bark may
+  have recorded it. Do not resubmit; sync and inspect `pendingBoards()` and
+  history first.
+
+New and changed behaviour:
+
+- `prepareBoard(..., excludedOutpoints: [OutPoint]? = nil)` never spends the
+  given coins; malformed or foreign outpoints are ignored.
+- Confirmed-only board and send preparations re-check that their parents are
+  still confirmed on first submit, and throw `preparedInputsUnavailable` after a
+  reorg (or an error when the chain source is unreachable).

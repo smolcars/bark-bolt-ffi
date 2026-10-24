@@ -1,6 +1,10 @@
 # Changelog
 
 Amounts are `u64` sats and fee rates sat/vB unless stated.
+Names use the Rust spelling: Swift lowercases the first letter
+(`BarkErrorCode.exitNonStandardVtxo`, `.uncertain`) and Kotlin uses
+SCREAMING_SNAKE enum constants (`BarkErrorCode.EXIT_NON_STANDARD_VTXO`) and
+class names for variants (`BroadcastOutcome.Uncertain`).
 
 ## 0.7.0 (unreleased)
 

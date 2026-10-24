@@ -79,6 +79,21 @@ different claims. Record them separately; do not mark one from evidence of anoth
 
 ## Tasks
 
+### 25 — Noah exit, board and preparation fixes (v0.7.0)
+
+- [x] Typed emergency-exit errors; `ExitProgressStatus.error` as `BarkError?`.
+- [x] Whole-wallet exit estimate applies bark's eligibility filter and reports excluded VTXOs.
+- [x] `prepareBoard` excluded outpoints.
+- [x] Confirmed-only parents re-checked at first submit of boards and prepared sends.
+- [x] `BroadcastOutcome.uncertain` when bark may have recorded a failed board.
+- [x] Rust/Swift/Kotlin live RegTest and two-round GPT-6 Astra review.
+- [ ] Main CI full matrix.
+- [ ] Stage CI artifacts, move install docs to 0.7.0, publish v0.7.0 and notify the
+      Noah rewrite thread (waits for approval).
+
+Engineering plan: [Noah FFI fixes](plans/26-noah-ffi-fixes.md).
+[Execution evidence](validation/noah-ffi-fixes-2026-10-24.md). Migration notes: [CHANGELOG](../CHANGELOG.md).
+
 ### 24 — Rust 1.99.1 toolchain
 
 - [x] Install exactly Rust 1.99.1 and align all active project/CI/packaging pins.
