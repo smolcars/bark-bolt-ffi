@@ -1771,7 +1771,10 @@
     ],
     "BarkError": [
       "message",
-      "code"
+      "code",
+      "vtxo_id",
+      "needed_sats",
+      "available_sats"
     ],
     "PreparedBoard": [
       "id",
@@ -1808,6 +1811,11 @@
       "network",
       "mailbox_id",
       "vtxo_xpub"
+    ],
+    "ExitProgressStatus": [
+      "vtxo_id",
+      "state",
+      "error"
     ]
   }
 }

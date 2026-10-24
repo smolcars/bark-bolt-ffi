@@ -2180,7 +2180,9 @@ impl Wallet {
         };
 
         let fee_rate = match fee_rate_sat_per_vb {
-            Some(v) => Some(bitcoin::FeeRate::from_sat_per_vb(v).context("Fee rate too large")?),
+            Some(v) => Some(bitcoin::FeeRate::from_sat_per_vb(v).ok_or_else(|| {
+                BarkError::typed(BarkErrorCode::InvalidFeeRate, "Fee rate too large")
+            })?),
             None => None,
         };
 

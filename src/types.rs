@@ -1320,12 +1320,13 @@ impl From<&BarkExitVtxo> for ExitVtxo {
 }
 
 /// Status of an exit progression
-#[derive(Clone, Debug, Serialize, Deserialize)]
+#[derive(Clone, Debug)]
 #[boltffi::data]
 pub struct ExitProgressStatus {
     pub vtxo_id: String,
     pub state: ExitState,
-    pub error: Option<String>,
+    /// Typed like errors thrown by exit calls; `code` tells permanent from transient.
+    pub error: Option<crate::error::BarkError>,
 }
 
 impl From<BarkExitProgressStatus> for ExitProgressStatus {
@@ -1333,7 +1334,7 @@ impl From<BarkExitProgressStatus> for ExitProgressStatus {
         Self {
             vtxo_id: eps.vtxo_id.to_string(),
             state: (&eps.state).into(),
-            error: eps.error.map(|e| e.to_string()),
+            error: eps.error.as_ref().map(crate::error::exit_error),
         }
     }
 }

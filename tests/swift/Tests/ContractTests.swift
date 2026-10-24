@@ -289,6 +289,17 @@ extension ContractTests {
         XCTAssertFalse(canceled.transactions.isEmpty)
         try await wallet.dangerousDropVtxo(id: id)
         do { _ = try await wallet.getVtxoById(vtxoId: id); XCTFail("Expected missing VTXO") } catch is BarkError {}
+        do {
+            _ = try await wallet.estimateEmergencyExitFee(vtxoIds: [id], feeRateSatPerVb: 1, destination: nil)
+            XCTFail("Expected unknown exit VTXO")
+        } catch let error as BarkError {
+            XCTAssertEqual(error.code, .exitUnknownVtxo)
+            XCTAssertEqual(error.vtxoId, id)
+        }
+        do {
+            _ = try await wallet.estimateEmergencyExitFee(vtxoIds: [], feeRateSatPerVb: UInt64.max, destination: nil)
+            XCTFail("Expected typed invalid fee rate")
+        } catch let error as BarkError { XCTAssertEqual(error.code, .invalidFeeRate) }
         do { try await wallet.dangerousDropVtxo(id: "invalid"); XCTFail("Expected invalid VTXO") } catch is BarkError {}
         _ = try await onchain.sync()
         let destination = try regtestCommand("bcli", "getnewaddress")
@@ -337,6 +348,19 @@ extension ContractTests {
 }
 
 extension ContractTests {
+    func testTypedExitErrors() {
+        let funds = BarkError(message: "needs fees", code: .exitInsufficientConfirmedFunds, neededSats: 5000, availableSats: 1200)
+        XCTAssertEqual(funds.neededSats, 5000)
+        XCTAssertEqual(funds.availableSats, 1200)
+        XCTAssertNil(funds.vtxoId)
+        XCTAssertNil(BarkError(message: "plain").vtxoId)
+        let progress: (ExitProgressStatus) -> BarkErrorCode? = { $0.error?.code }
+        _ = progress
+        let permanent: Set<BarkErrorCode> = [.exitNonStandardVtxo, .exitDustLimit, .exitVtxoAlreadySpent, .exitVtxoAlreadyExited, .exitVtxoSwept, .exitUnknownVtxo, .exitCyclicTransactions, .exitMissingAnchorOutput]
+        let transient: Set<BarkErrorCode> = [.exitTransactionRetrievalFailure, .exitTipRetrievalFailure, .exitBlockRetrievalFailure, .exitAncestorRetrievalFailure]
+        XCTAssertEqual(permanent.union(transient).count, 12)
+    }
+
     func testWalletSyncOnSwiftWorkerStack() async throws {
         guard ProcessInfo.processInfo.environment["BARK_REGTEST"] == "1" else { throw XCTSkip("requires live RegTest") }
         let directory = FileManager.default.temporaryDirectory.appendingPathComponent(UUID().uuidString)

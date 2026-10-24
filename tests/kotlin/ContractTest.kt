@@ -270,6 +270,10 @@ class NoahP1ContractTest {
                     assertTrue(canceled.transactions.isNotEmpty())
                     wallet.dangerousDropVtxo(id)
                     assertFailsWith<BarkError> { wallet.getVtxoById(id) }
+                    val unknown = assertFailsWith<BarkError> { wallet.estimateEmergencyExitFee(listOf(id),1uL,null) }
+                    assertEquals(BarkErrorCode.EXIT_UNKNOWN_VTXO,unknown.code)
+                    assertEquals(id,unknown.vtxoId)
+                    assertEquals(BarkErrorCode.INVALID_FEE_RATE,assertFailsWith<BarkError> { wallet.estimateEmergencyExitFee(emptyList(),ULong.MAX_VALUE,null) }.code)
                     assertFailsWith<BarkError> { wallet.dangerousDropVtxo("invalid") }
                     onchain.sync()
                     val destination = regtestCommand("bcli","getnewaddress")
@@ -307,6 +311,21 @@ class NoahP1ContractTest {
                 }
             }
         } finally { directory.deleteRecursively() }
+    }
+}
+
+class V070ContractTest {
+    @Test fun typedExitErrors() {
+        val funds = BarkError("needs fees",BarkErrorCode.EXIT_INSUFFICIENT_CONFIRMED_FUNDS,neededSats=5000uL,availableSats=1200uL)
+        assertEquals(5000uL,funds.neededSats)
+        assertEquals(1200uL,funds.availableSats)
+        assertNull(funds.vtxoId)
+        assertNull(BarkError("plain").vtxoId)
+        val progress: (ExitProgressStatus) -> BarkErrorCode? = { it.error?.code }
+        assertNotNull(progress)
+        val permanent = setOf(BarkErrorCode.EXIT_NON_STANDARD_VTXO,BarkErrorCode.EXIT_DUST_LIMIT,BarkErrorCode.EXIT_VTXO_ALREADY_SPENT,BarkErrorCode.EXIT_VTXO_ALREADY_EXITED,BarkErrorCode.EXIT_VTXO_SWEPT,BarkErrorCode.EXIT_UNKNOWN_VTXO,BarkErrorCode.EXIT_CYCLIC_TRANSACTIONS,BarkErrorCode.EXIT_MISSING_ANCHOR_OUTPUT)
+        val transient = setOf(BarkErrorCode.EXIT_TRANSACTION_RETRIEVAL_FAILURE,BarkErrorCode.EXIT_TIP_RETRIEVAL_FAILURE,BarkErrorCode.EXIT_BLOCK_RETRIEVAL_FAILURE,BarkErrorCode.EXIT_ANCESTOR_RETRIEVAL_FAILURE)
+        assertEquals(12,(permanent+transient).size)
     }
 }
 
