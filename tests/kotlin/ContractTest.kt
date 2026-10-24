@@ -330,6 +330,18 @@ class V070ContractTest {
         assertEquals(12,(permanent+transient).size)
     }
 
+    @Test fun uncertainBoardOutcome() {
+        fun retry(outcome: BroadcastOutcome): Boolean = when (outcome) {
+            BroadcastOutcome.Accepted -> false
+            is BroadcastOutcome.Failed -> true
+            is BroadcastOutcome.NotAttempted -> true
+            is BroadcastOutcome.Uncertain -> false
+        }
+        val uncertain = BroadcastOutcome.Uncertain("checkpoint write failed")
+        assertFalse(retry(uncertain))
+        assertEquals("checkpoint write failed",uncertain.reason)
+    }
+
     @Test fun excludedExitVtxos() {
         val skipped = ExcludedExitVtxo(vtxoId="ab:0",amountSats=200uL,code=BarkErrorCode.EXIT_NON_STANDARD_VTXO,message="dust")
         val estimate = EmergencyExitFeeEstimate(exitBroadcastFeeSats=1uL,claimFeeSats=2uL,totalFeeSats=3uL,feeRateSatPerVb=1uL,txsToBroadcast=1uL,excludedVtxos=listOf(skipped))

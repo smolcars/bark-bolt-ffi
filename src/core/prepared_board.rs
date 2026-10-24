@@ -19,6 +19,8 @@ pub(super) struct BoardPreparation {
     ark_fee: Amount,
     funding_script: bitcoin::ScriptBuf,
     submitted: Option<Vec<String>>,
+    /// Bark failed after it may have stored the board; resubmitting could board twice.
+    uncertain: bool,
 }
 
 fn unsupported() -> BarkError {
@@ -152,6 +154,7 @@ impl Wallet {
             ark_fee,
             funding_script,
             submitted: None,
+            uncertain: false,
         });
         Ok(types::PreparedBoard {
             id: prepared.id,
@@ -190,6 +193,12 @@ impl Wallet {
                     )
                 })?
                 .clone();
+            if board.uncertain {
+                return Err(unavailable(
+                    "an earlier submit may have recorded this board; sync, check pending boards \
+                     and history, then discard",
+                ));
+            }
             if board.submitted.is_none() {
                 let available: std::collections::HashSet<_> = state
                     .wallet
@@ -316,13 +325,34 @@ impl Wallet {
             {
                 Ok(pending) => pending,
                 Err(error) => {
+                    let reason = format!("{error:#}");
+                    // Bark writes the BOARD movement before its checkpoint, so an error can
+                    // follow a partial record. A failed lookup counts as recorded.
+                    let recorded = self
+                        .board_recorded(transaction.compute_txid())
+                        .await
+                        .unwrap_or(true);
+                    if !recorded {
+                        return Ok(types::BoardResult {
+                            txid,
+                            broadcast: BroadcastOutcome::NotAttempted { reason },
+                            vtxo_ids: Vec::new(),
+                        });
+                    }
+                    let mut guard = onchain.write().await;
+                    let state = (&mut *guard as &mut dyn std::any::Any)
+                        .downcast_mut::<WalletState>()
+                        .ok_or_else(unsupported)?;
+                    let entry = state
+                        .prepared
+                        .get_mut(&id)
+                        .expect("operation gate protects board");
+                    entry.board.as_mut().expect("board preparation").uncertain = true;
                     return Ok(types::BoardResult {
                         txid,
-                        broadcast: BroadcastOutcome::NotAttempted {
-                            reason: format!("{error:#}"),
-                        },
+                        broadcast: BroadcastOutcome::Uncertain { reason },
                         vtxo_ids: Vec::new(),
-                    })
+                    });
                 }
             };
             let ids: Vec<_> = pending.vtxos.iter().map(ToString::to_string).collect();
@@ -367,6 +397,26 @@ impl Wallet {
             broadcast,
             vtxo_ids,
         })
+    }
+
+    /// Whether Bark stored a pending board or BOARD movement for this funding txid.
+    async fn board_recorded(&self, txid: bitcoin::Txid) -> anyhow::Result<bool> {
+        if self
+            .inner
+            .pending_boards()
+            .await?
+            .iter()
+            .any(|board| board.funding_tx.compute_txid() == txid)
+        {
+            return Ok(true);
+        }
+        Ok(self.inner.history().await?.iter().any(|movement| {
+            movement
+                .metadata
+                .get("chain_anchor")
+                .and_then(|anchor| serde_json::from_value::<bitcoin::OutPoint>(anchor.clone()).ok())
+                .is_some_and(|anchor| anchor.txid == txid)
+        }))
     }
 
     pub async fn discard_prepared_board(&self, id: String) -> Result<(), BarkError> {

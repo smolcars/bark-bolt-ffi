@@ -1739,8 +1739,17 @@ impl From<bark_bitcoin_ext::TxStatus> for TransactionStatus {
 #[boltffi::data]
 pub enum BroadcastOutcome {
     Accepted,
-    Failed { reason: String },
-    NotAttempted { reason: String },
+    Failed {
+        reason: String,
+    },
+    NotAttempted {
+        reason: String,
+    },
+    /// The board failed after Bark may have recorded it. The preparation is consumed:
+    /// sync, then check `pendingBoards()` and history before preparing again.
+    Uncertain {
+        reason: String,
+    },
 }
 
 #[derive(Clone, Debug)]

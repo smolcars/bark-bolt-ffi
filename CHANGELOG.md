@@ -71,3 +71,20 @@ keeps working.
 
 **Migration:** none in the API; handle `PreparedInputsUnavailable` from submit
 as "inputs changed, prepare again or wait".
+
+### Uncertain board outcome
+
+Bark writes the BOARD movement before its checkpoint, so `submitPreparedBoard`
+can fail after Bark has partly recorded the board. When Bark returns an error,
+the SDK now checks for a pending board or a movement whose `chain_anchor` is
+this funding transaction. If it finds one, or the check itself fails, the
+result is the new `BroadcastOutcome.uncertain(reason:)`
+(Kotlin `BroadcastOutcome.Uncertain`) and the preparation is consumed: later
+submits throw `PreparedInputsUnavailable`, and `discardPreparedBoard` still
+releases it. Without a record, the outcome stays `notAttempted` and a retry
+is safe.
+
+**Migration:** handle the new case in exhaustive `switch`/`when` over
+`BroadcastOutcome`. On `uncertain`, do not resubmit. Sync, inspect
+`pendingBoards()` and history for the funding txid, then discard the
+preparation and prepare again only if nothing was boarded.

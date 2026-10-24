@@ -737,3 +737,37 @@ fn live_confirmed_only_send_rejects_parent_reorged_to_mempool() {
         })
     });
 }
+
+#[test]
+fn live_board_failing_after_movement_write_is_uncertain_and_not_resubmitted() {
+    if std::env::var("BARK_REGTEST").as_deref() != Ok("1") {
+        return;
+    }
+    tokio::runtime::Runtime::new().unwrap().block_on(async {
+        let directory = tempfile::tempdir().unwrap();
+        let mnemonic = generate_mnemonic().unwrap();
+        let onchain = OnchainWallet::default(Network::Regtest, mnemonic.clone(), config(), directory.path().to_str().unwrap().into()).await.unwrap();
+        let wallet = Wallet::open_with_onchain(Network::Regtest, mnemonic, config(), args(directory.path()), &onchain).await.unwrap();
+        regtest(&["send-to", &onchain.new_address().await.unwrap(), "0.001"]);
+        regtest(&["generate", "1"]);
+        onchain.sync().await.unwrap();
+        let prepared = wallet.prepare_board(OnchainSendAmount::DrainAll, 1, true, None).await.unwrap();
+        let connection = rusqlite::Connection::open(directory.path().join("db.sqlite")).unwrap();
+        // Bark stores the BOARD movement, then fails to store its checkpoint.
+        connection.execute_batch("CREATE TRIGGER fail_checkpoint BEFORE INSERT ON bark_wallet_action_checkpoint BEGIN SELECT RAISE(ABORT, 'board checkpoint write failure'); END;").unwrap();
+        let result = wallet.submit_prepared_board(prepared.id.clone()).await.unwrap();
+        assert!(matches!(result.broadcast, BroadcastOutcome::Uncertain { ref reason } if reason.contains("board checkpoint write failure")), "{:?}", result.broadcast);
+        assert!(result.vtxo_ids.is_empty());
+        let boards = || async {
+            wallet.history().await.unwrap().into_iter().filter(|movement| movement.subsystem_name == "bark.board").count()
+        };
+        assert_eq!(boards().await, 1);
+        connection.execute_batch("DROP TRIGGER fail_checkpoint").unwrap();
+        // Even once the database works again, a second cosign would create a second board.
+        let error = wallet.submit_prepared_board(prepared.id.clone()).await.unwrap_err();
+        assert_eq!(error.code, BarkErrorCode::PreparedInputsUnavailable);
+        assert_eq!(boards().await, 1);
+        assert_eq!(wallet.transaction_status(prepared.txid).await.unwrap(), TransactionStatus::NotFound);
+        wallet.discard_prepared_board(prepared.id).await.unwrap();
+    });
+}

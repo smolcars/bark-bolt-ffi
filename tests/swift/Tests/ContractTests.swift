@@ -364,6 +364,20 @@ extension ContractTests {
         XCTAssertEqual(permanent.union(transient).count, 12)
     }
 
+    func testUncertainBoardOutcome() {
+        func retry(_ outcome: BroadcastOutcome) -> Bool {
+            switch outcome {
+            case .accepted: return false
+            case .failed, .notAttempted: return true
+            case .uncertain: return false
+            }
+        }
+        let uncertain = BroadcastOutcome.uncertain(reason: "checkpoint write failed")
+        XCTAssertFalse(retry(uncertain))
+        guard case .uncertain(let reason) = uncertain else { return XCTFail("Expected uncertain") }
+        XCTAssertEqual(reason, "checkpoint write failed")
+    }
+
     func testExcludedExitVtxos() {
         let skipped = ExcludedExitVtxo(vtxoId: "ab:0", amountSats: 200, code: .exitNonStandardVtxo, message: "dust")
         let estimate = EmergencyExitFeeEstimate(exitBroadcastFeeSats: 1, claimFeeSats: 2, totalFeeSats: 3, feeRateSatPerVb: 1, txsToBroadcast: 1, excludedVtxos: [skipped])
