@@ -14,7 +14,7 @@ env:
   CARGO_TERM_COLOR: always
   CARGO_BUILD_JOBS: 2
   CARGO_PROFILE_DEV_DEBUG: 0
-  RUSTUP_TOOLCHAIN: 1.90.0
+  RUSTUP_TOOLCHAIN: 1.99.1
   BARK_PR_BUILD: ${{ github.event_name == 'pull_request' && '1' || '0' }}
 jobs:
   rust:
@@ -23,7 +23,7 @@ jobs:
     steps:
       - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
       - run: sudo apt-get update && sudo apt-get install -y protobuf-compiler cmake pkg-config libssl-dev just jq shellcheck
-      - run: rustup toolchain install 1.90.0 --profile minimal --component rustfmt,clippy
+      - run: rustup toolchain install 1.99.1 --profile minimal --component rustfmt,clippy
       # Restore everywhere, save only from main: PR and tag entries are unreadable elsewhere and evict main's.
       - uses: Swatinem/rust-cache@d1527c8f67ef9af357290475d4af4b0fab8f12e0 # v2.9.3
         with:
@@ -46,7 +46,7 @@ jobs:
           distribution: temurin
           java-version: '17'
       - run: sudo apt-get update && sudo apt-get install -y protobuf-compiler cmake pkg-config libssl-dev just jq
-      - run: rustup toolchain install 1.90.0 --profile minimal
+      - run: rustup toolchain install 1.99.1 --profile minimal
       - run: rustup target add aarch64-linux-android x86_64-linux-android
       - if: github.event_name != 'pull_request'
         run: rustup target add armv7-linux-androideabi
@@ -120,7 +120,7 @@ jobs:
     steps:
       - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
       - run: brew install protobuf xcodegen just
-      - run: rustup toolchain install 1.90.0 --profile minimal
+      - run: rustup toolchain install 1.99.1 --profile minimal
       - run: rustup target add aarch64-apple-ios aarch64-apple-ios-sim aarch64-apple-darwin
       - if: github.event_name != 'pull_request'
         run: rustup target add x86_64-apple-ios x86_64-apple-darwin

@@ -51,7 +51,7 @@ class ReleaseTests(unittest.TestCase):
             'src/lib.rs': '// fixture\n',
             'Cargo.toml': '[package]\nname="fixture"\nversion="9.8.7"\nedition="2021"\n',
             'Cargo.lock': 'version = 4\n[[package]]\nname="fixture"\nversion="9.8.7"\n',
-            'rust-toolchain.toml': '[toolchain]\nchannel="1.90.0"\n',
+            'rust-toolchain.toml': '[toolchain]\nchannel="1.99.1"\n',
             'boltffi.toml': '', '.cargo/config.toml': '', 'sdk/swift-support/Concurrency.swift': '',
             'scripts/build-sdk.sh': '', 'sdk/swift/Sources/fixture.swift': '// SDK\n',
             'Package.swift': '// immutable checksum abc123\n',

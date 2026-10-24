@@ -22,7 +22,7 @@ XCFramework. Kotlin: build the AAR/JVM JAR below, or download [versioned release
 
 ## Local build
 
-Install Rust 1.90, protobuf (`protoc`), Just, jq, JDK17 and the Android SDK/NDK28.2.13676358.
+Install Rust 1.99.1, protobuf (`protoc`), Just, jq, JDK17 and the Android SDK/NDK28.2.13676358.
 Apple builds need Xcode; the example project uses XcodeGen. Homebrew tools must
 be on PATH. Install the pinned BoltFFI CLI with:
 

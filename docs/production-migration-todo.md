@@ -79,6 +79,99 @@ different claims. Record them separately; do not mark one from evidence of anoth
 
 ## Tasks
 
+### 24 — Rust 1.99.1 toolchain
+
+- [x] Install exactly Rust 1.99.1 and align all active project/CI/packaging pins.
+- [x] Run the documented Rust and tooling checks and record actual outcomes.
+
+Engineering plan and affected paths (2026-10-24):
+
+- Verify availability against the official Rust release announcement and
+  distribution manifest, then install `1.99.1` with `rustfmt`, `clippy` and the
+  existing supported Apple/Android targets. If installation is unavailable,
+  retain the working 1.90.0 pins and record the blocker; do not substitute a version.
+- Align `rust-toolchain.toml`, `.github/workflows/{ci,integration}.yml`,
+  `scripts/build-sdk.sh`, `scripts/swift-artifact.py`, the toolchain fixture in
+  `tests/python/test_tooling.py` and `README.md`. This checklist owns the plan
+  and validation record. Preserve historical validation/planning records and
+  `sdk/swift/provenance.json`, which describes the already-published artifact.
+- Interfaces/ownership: retain the existing toolchain selection and packaging
+  interfaces; only change their version values. Keep Rust edition 2021,
+  Cargo.lock, dependency pins, public APIs, wallet logic, transaction validation,
+  persistence, platform minimums, ABI matrix, licenses and attribution unchanged.
+  Do not touch reference checkouts, existing wallet/database volumes or unrelated
+  edits. Add no tests for trivial pin changes. After local validation, the user
+  requested a commit/push to the default branch (`main`; origin has no `master`)
+  on 2026-10-24. Push only the scoped changes without a PR or force-push.
+- Dependencies: official rustup downloads; existing protobuf/native build tools
+  and locked Cargo dependencies. Install the eight supported targets already
+  present under 1.90.0; its extra i686 Android target is outside the SDK matrix.
+- Validation: capture `rustc --version --verbose`, `cargo --version`, installed
+  components/targets and selected toolchain; run `cargo fmt --check`,
+  `cargo clippy --locked --all-targets -- -D warnings`, `cargo test --locked`,
+  `cargo build --locked`, `python3 scripts/swift-artifact.py`,
+  `python3 -m unittest discover -s tests/python -v`, script syntax checks and
+  `git diff --check`. Review remaining version references and generated/unrelated
+  changes. Record compatibility failures before making any further source edits.
+  Native app execution, live RegTest, full cross-platform SDK packaging and
+  hosted CI require separate execution evidence; local checks do not imply them.
+
+Implemented: all seven planned configuration/script/documentation/fixture paths
+now use 1.99.1; the checklist is the eighth changed file. No dependency, lockfile,
+Rust source, generated SDK or published artifact metadata changes.
+
+Validation commands and results (2026-10-24, macOS ARM64):
+
+- Availability: [official release announcement](https://blog.rust-lang.org/2026/10/15/Rust-1.99.1/)
+  and [distribution manifest](https://static.rust-lang.org/dist/channel-rust-1.99.1.toml)
+  confirm the October 15 release and an available aarch64-apple-darwin package.
+- `rustup toolchain install 1.99.1 --profile minimal --component rustfmt,clippy
+  --target aarch64-apple-darwin,aarch64-apple-ios,aarch64-apple-ios-sim,x86_64-apple-darwin,x86_64-apple-ios,aarch64-linux-android,armv7-linux-androideabi,x86_64-linux-android`
+  succeeded. Installed components and targets were verified with rustup; the
+  repository override selects `1.99.1-aarch64-apple-darwin`. Global default and
+  the existing 1.90.0 installation were preserved.
+- Exact toolchain output:
+
+  ```text
+  rustc 1.99.1 (58cf8f9c3 2026-10-13)
+  binary: rustc
+  commit-hash: 58cf8f9c35b355199727627d07ae34a4e2846d67
+  commit-date: 2026-10-13
+  host: aarch64-apple-darwin
+  release: 1.99.1
+  LLVM version: 23.1.1
+  cargo 1.99.1 (5f94df478 2026-08-27)
+  ```
+
+- `cargo fmt --check`: passed.
+- `cargo clippy --locked --all-targets -- -D warnings`: passed in 1m 55s.
+- `cargo test --locked`: passed (90 unit-test entries, seven integration-test
+  entries, zero doctests; compilation took 2m 33s). `BARK_REGTEST` was disabled:
+  five unit and all seven integration entries returned at their environment
+  guards. This validates 85 offline unit tests, not those 12 live scenarios.
+- `cargo build --locked`: passed after the test build (0.21s).
+- `python3 scripts/swift-artifact.py`: passed published file/manifest integrity.
+- `python3 -m unittest discover -s tests/python -v`: all 10 tests passed.
+- `bash -n scripts/build-sdk.sh scripts/install-boltffi.sh`, ShellCheck on those
+  scripts plus `scripts/ark-dev.sh` and `tests/shell/ark-dev.sh`, and
+  `bash tests/shell/ark-dev.sh`: passed.
+- `git diff --check`: passed. Search of active scripts/config/docs/fixtures found
+  no remaining 1.90.0 pin; the old value remains in historical evidence and
+  published Swift provenance only. All eight changed paths match the plan.
+- Rust checks used the CI settings `CARGO_BUILD_JOBS=2`,
+  `CARGO_PROFILE_DEV_DEBUG=0` and the SDK's `MACOSX_DEPLOYMENT_TARGET=13.0`,
+  with Homebrew tools on PATH.
+
+Artifacts / device or CI run evidence: local command output above; no device or
+hosted CI run. Build logs are outside the repository.
+
+Remaining limits: native app execution, live RegTest, full cross-platform SDK
+packaging and hosted CI were not validated for 1.99.1 by these local checks.
+Published v0.6.0 Swift artifacts retain their truthful 1.90.0
+provenance; a future release must rebuild/stage artifacts before the tag's source
+freshness gate can pass. Reference repositories and wallet/database volumes were
+not touched.
+
 ### 23 — CI caches shared from main
 
 - [x] Rust dependency caches via rust-cache and Gradle caches, saved only from main.

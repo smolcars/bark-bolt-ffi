@@ -132,7 +132,7 @@ def stage():
     (ROOT / 'Package.swift').write_text(package + '\n')
     (SDK / 'provenance.json').write_text(json.dumps({
         'version': version, 'bark': '0.8.0', 'bark_revision': '959a489ff4934b181783b41c7d3ee68d85b95cbf', 'boltffi': '0.31.1',
-        'rust': '1.90.0', 'minimum_ios': '16.0', 'minimum_macos': '13.0', 'profile': 'release', 'archive_sha256': archive_hash, 'source_sha256': source_digest(),
+        'rust': '1.99.1', 'minimum_ios': '16.0', 'minimum_macos': '13.0', 'profile': 'release', 'archive_sha256': archive_hash, 'source_sha256': source_digest(),
         'files': artifacts(), 'package_sha256': checksum(ROOT / 'Package.swift'),
     }, indent=2, sort_keys=True) + '\n')
     print(f'Staged release SwiftPM manifest and generated sources; archive: {archive.stat().st_size} bytes')

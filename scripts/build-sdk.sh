@@ -2,7 +2,7 @@
 set -euo pipefail
 cd "$(dirname "${BASH_SOURCE[0]}")/.."
 export PATH="/opt/homebrew/bin:$PATH"
-export RUSTUP_TOOLCHAIN=1.90.0
+export RUSTUP_TOOLCHAIN=1.99.1
 export CARGO_PROFILE_DEV_DEBUG=0
 if [[ "$(uname -s)" == Darwin ]]; then
     export MACOSX_DEPLOYMENT_TARGET=13.0
