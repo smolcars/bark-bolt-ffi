@@ -2,7 +2,7 @@ use std::fmt;
 
 /// Stable error categories; messages retain the underlying diagnostic.
 #[boltffi::data]
-#[derive(Clone, Copy, Debug, PartialEq, Eq, Hash)]
+#[derive(Clone, Copy, Debug, PartialEq, Eq, Hash, serde::Serialize, serde::Deserialize)]
 pub enum BarkErrorCode {
     Other,
     InvalidAddress,

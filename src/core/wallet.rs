@@ -2151,7 +2151,9 @@ impl Wallet {
     /// Estimate the onchain cost of unilaterally (emergency) exiting VTXOs.
     ///
     /// Mirrors bark-rest `GET /exits/fee`. An empty `vtxo_ids` prices exiting
-    /// every spendable VTXO, i.e. the whole wallet. `fee_rate_sat_per_vb`
+    /// every unspent (spendable or locked) VTXO bark's whole-wallet exit would start, i.e. it skips
+    /// non-standard (including dust) VTXOs and lists them in
+    /// `excluded_vtxos`. `fee_rate_sat_per_vb`
     /// applies to both legs; when `None`, the broadcast leg uses the chain's
     /// *fast* rate and the claim leg its *regular* rate. `destination` only
     /// affects the claim transaction's weight; when `None` a placeholder P2TR
@@ -2167,14 +2169,38 @@ impl Wallet {
         destination: Option<String>,
         fee_margin: Option<f64>,
     ) -> Result<types::EmergencyExitFeeEstimate, BarkError> {
+        let mut excluded = Vec::new();
         let ids = if vtxo_ids.is_empty() {
-            self.inner
-                .spendable_vtxos()
+            // Same eligibility as bark's start_exit_for_entire_wallet: unspent (spendable or
+            // locked) VTXOs, skipping non-standard ones.
+            let mut ids = Vec::new();
+            for wallet_vtxo in self
+                .inner
+                .vtxos()
                 .await
-                .context("Failed to list spendable VTXOs")?
-                .into_iter()
-                .map(|v| v.vtxo.id())
-                .collect()
+                .context("Failed to list unspent VTXOs")?
+            {
+                let vtxo = wallet_vtxo.vtxo;
+                let refusal = match self.inner.get_full_vtxo(vtxo.id()).await {
+                    Ok(full) => full.check_standard().err().map(|error| {
+                        crate::error::exit_error(&bark::exit::ExitError::NonStandardVtxo {
+                            vtxo: vtxo.id(),
+                            error,
+                        })
+                    }),
+                    Err(error) => Some(BarkError::from(error)),
+                };
+                match refusal {
+                    None => ids.push(vtxo.id()),
+                    Some(error) => excluded.push(types::ExcludedExitVtxo {
+                        vtxo_id: vtxo.id().to_string(),
+                        amount_sats: vtxo.amount().to_sat(),
+                        code: error.code,
+                        message: error.message,
+                    }),
+                }
+            }
+            ids
         } else {
             parse_vtxo_ids(&vtxo_ids)?
         };
@@ -2196,7 +2222,10 @@ impl Wallet {
             .estimate_emergency_exit_fee(&ids, fee_rate, destination, fee_margin)
             .await
             .context("Failed to estimate emergency exit fee")?;
-        Ok(estimate.into())
+        Ok(types::EmergencyExitFeeEstimate {
+            excluded_vtxos: excluded,
+            ..estimate.into()
+        })
     }
 }
 

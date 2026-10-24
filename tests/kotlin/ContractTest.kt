@@ -226,6 +226,7 @@ class NoahP1ContractTest {
                     val board = wallet.boardAmount(100000uL)
                     assertTrue(board.vtxoIds.isNotEmpty())
                     regtestCommand("generate","6"); wallet.sync()
+                    assertTrue(wallet.estimateEmergencyExitFee(emptyList(),1uL,null).excludedVtxos.isEmpty())
                     val movement = wallet.history().first()
                     wallet.updateHistoryMetadata(movement.id,"{\"note\":\"Noah Kotlin\"}")
                     assertTrue(wallet.history().first { it.id==movement.id }.metadataJson.contains("Noah Kotlin"))
@@ -326,6 +327,12 @@ class V070ContractTest {
         val permanent = setOf(BarkErrorCode.EXIT_NON_STANDARD_VTXO,BarkErrorCode.EXIT_DUST_LIMIT,BarkErrorCode.EXIT_VTXO_ALREADY_SPENT,BarkErrorCode.EXIT_VTXO_ALREADY_EXITED,BarkErrorCode.EXIT_VTXO_SWEPT,BarkErrorCode.EXIT_UNKNOWN_VTXO,BarkErrorCode.EXIT_CYCLIC_TRANSACTIONS,BarkErrorCode.EXIT_MISSING_ANCHOR_OUTPUT)
         val transient = setOf(BarkErrorCode.EXIT_TRANSACTION_RETRIEVAL_FAILURE,BarkErrorCode.EXIT_TIP_RETRIEVAL_FAILURE,BarkErrorCode.EXIT_BLOCK_RETRIEVAL_FAILURE,BarkErrorCode.EXIT_ANCESTOR_RETRIEVAL_FAILURE)
         assertEquals(12,(permanent+transient).size)
+    }
+
+    @Test fun excludedExitVtxos() {
+        val skipped = ExcludedExitVtxo(vtxoId="ab:0",amountSats=200uL,code=BarkErrorCode.EXIT_NON_STANDARD_VTXO,message="dust")
+        val estimate = EmergencyExitFeeEstimate(exitBroadcastFeeSats=1uL,claimFeeSats=2uL,totalFeeSats=3uL,feeRateSatPerVb=1uL,txsToBroadcast=1uL,excludedVtxos=listOf(skipped))
+        assertEquals(200uL,estimate.excludedVtxos.single().amountSats)
     }
 }
 

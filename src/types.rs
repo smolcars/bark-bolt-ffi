@@ -597,7 +597,7 @@ impl From<bark::FeeEstimate> for FeeEstimate {
 /// onchain funds to CPFP-bump every not-yet-confirmed exit transaction, while
 /// `claim_fee_sats` is deducted later from the recovered value when the
 /// matured outputs are drained.
-#[derive(Copy, Clone, Debug, Serialize, Deserialize)]
+#[derive(Clone, Debug, Serialize, Deserialize)]
 #[boltffi::data]
 pub struct EmergencyExitFeeEstimate {
     /// CPFP fees to broadcast every not-yet-confirmed exit transaction. Paid
@@ -616,6 +616,20 @@ pub struct EmergencyExitFeeEstimate {
     /// Number of exit transactions that still need to be broadcast and
     /// CPFP-bumped. Already-confirmed tree transactions are not counted.
     pub txs_to_broadcast: u64,
+    /// VTXOs a whole-wallet estimate (empty `vtxo_ids`) left out because bark
+    /// would not exit them. Always empty when ids were given.
+    pub excluded_vtxos: Vec<ExcludedExitVtxo>,
+}
+
+/// A VTXO left out of a whole-wallet exit estimate, and why.
+#[derive(Clone, Debug, Serialize, Deserialize)]
+#[boltffi::data]
+pub struct ExcludedExitVtxo {
+    pub vtxo_id: String,
+    pub amount_sats: u64,
+    /// Usually `ExitNonStandardVtxo`; `Other` if the VTXO could not be loaded.
+    pub code: crate::error::BarkErrorCode,
+    pub message: String,
 }
 
 impl From<bark::exit::ExitFeeEstimate> for EmergencyExitFeeEstimate {
@@ -626,6 +640,7 @@ impl From<bark::exit::ExitFeeEstimate> for EmergencyExitFeeEstimate {
             claim_fee_sats: e.claim_fee.to_sat(),
             fee_rate_sat_per_vb: e.fee_rate.to_sat_per_vb_ceil(),
             txs_to_broadcast: e.txs_to_broadcast as u64,
+            excluded_vtxos: Vec::new(),
         }
     }
 }

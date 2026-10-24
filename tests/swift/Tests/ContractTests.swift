@@ -236,6 +236,8 @@ extension ContractTests {
         XCTAssertFalse(board.vtxoIds.isEmpty)
         _ = try regtestCommand("generate", "6")
         try await wallet.sync()
+        let wholeWallet = try await wallet.estimateEmergencyExitFee(vtxoIds: [], feeRateSatPerVb: 1, destination: nil)
+        XCTAssertTrue(wholeWallet.excludedVtxos.isEmpty)
         let history = try await wallet.history()
         let movement = try XCTUnwrap(history.first)
         try await wallet.updateHistoryMetadata(movementId: movement.id, patchJson: "{\"note\":\"Noah Swift\"}")
@@ -359,6 +361,12 @@ extension ContractTests {
         let permanent: Set<BarkErrorCode> = [.exitNonStandardVtxo, .exitDustLimit, .exitVtxoAlreadySpent, .exitVtxoAlreadyExited, .exitVtxoSwept, .exitUnknownVtxo, .exitCyclicTransactions, .exitMissingAnchorOutput]
         let transient: Set<BarkErrorCode> = [.exitTransactionRetrievalFailure, .exitTipRetrievalFailure, .exitBlockRetrievalFailure, .exitAncestorRetrievalFailure]
         XCTAssertEqual(permanent.union(transient).count, 12)
+    }
+
+    func testExcludedExitVtxos() {
+        let skipped = ExcludedExitVtxo(vtxoId: "ab:0", amountSats: 200, code: .exitNonStandardVtxo, message: "dust")
+        let estimate = EmergencyExitFeeEstimate(exitBroadcastFeeSats: 1, claimFeeSats: 2, totalFeeSats: 3, feeRateSatPerVb: 1, txsToBroadcast: 1, excludedVtxos: [skipped])
+        XCTAssertEqual(estimate.excludedVtxos.first?.amountSats, 200)
     }
 
     func testWalletSyncOnSwiftWorkerStack() async throws {

@@ -1535,6 +1535,10 @@
     {
       "name": "DebugInfo",
       "source": "src/types.rs"
+    },
+    {
+      "name": "ExcludedExitVtxo",
+      "source": "src/types.rs"
     }
   ],
   "enums": [
@@ -1816,6 +1820,20 @@
       "vtxo_id",
       "state",
       "error"
+    ],
+    "EmergencyExitFeeEstimate": [
+      "exit_broadcast_fee_sats",
+      "claim_fee_sats",
+      "total_fee_sats",
+      "fee_rate_sat_per_vb",
+      "txs_to_broadcast",
+      "excluded_vtxos"
+    ],
+    "ExcludedExitVtxo": [
+      "vtxo_id",
+      "amount_sats",
+      "code",
+      "message"
     ]
   }
 }

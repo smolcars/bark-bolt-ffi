@@ -29,3 +29,19 @@ returns `InvalidFeeRate`.
 `BarkError?`. Read `error?.message` for the old text and `error?.code` to
 decide whether to retry. Exhaustive `switch`/`when` over `BarkErrorCode` needs
 the new cases.
+
+### Whole-wallet exit estimate skips VTXOs bark would not exit
+
+`estimateEmergencyExitFee(vtxoIds: [])` now prices what bark's whole-wallet
+exit would start: every unspent VTXO, spendable or locked (previously only
+spendable), minus non-standard ones. One dust or non-standard VTXO no longer fails the
+estimate; it is left out and listed in the new
+`EmergencyExitFeeEstimate.excludedVtxos: [ExcludedExitVtxo]`
+(`vtxoId`, `amountSats`, `code`, `message`). `code` is
+`ExitNonStandardVtxo` (dust is a kind of non-standard), or `Other` when the
+VTXO could not be loaded. Explicit ids are still priced as given and fail with
+the typed code.
+
+**Migration:** code that constructs `EmergencyExitFeeEstimate` passes
+`excludedVtxos`. Show `excludedVtxos` next to an "exit all" estimate; those
+funds need a refresh before they can be exited.
