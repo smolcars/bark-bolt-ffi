@@ -1,7 +1,7 @@
 use bark_bolt_ffi::wallet::WalletOpenArgs;
 use bark_bolt_ffi::{
     generate_mnemonic, BarkErrorCode, BroadcastOutcome, Config, ExitState, ExitTxStatus, Network,
-    OnchainSendAmount, OnchainWallet, TransactionStatus, Wallet,
+    OnchainSendAmount, OnchainUtxo, OnchainWallet, OutPoint, TransactionStatus, Wallet,
 };
 use std::collections::BTreeMap;
 use std::path::Path;
@@ -60,12 +60,12 @@ fn live_prepared_board_exact_fees_reservations_status_and_cancel_reopen() {
         onchain.sync().await.unwrap();
         let before = files(directory.path());
         for rate in [0,u64::MAX,u64::MAX/500] {
-            assert_eq!(wallet.prepare_board(OnchainSendAmount::DrainAll,rate,true).await.unwrap_err().code,BarkErrorCode::InvalidFeeRate);
+            assert_eq!(wallet.prepare_board(OnchainSendAmount::DrainAll,rate,true, None).await.unwrap_err().code,BarkErrorCode::InvalidFeeRate);
         }
-        assert_eq!(wallet.prepare_board(OnchainSendAmount::Amount {amount_sats:1},10,true).await.unwrap_err().code,BarkErrorCode::BelowMinimumBoardAmount);
-        assert_eq!(wallet.prepare_board(OnchainSendAmount::Amount {amount_sats:500_000},10,true).await.unwrap_err().code,BarkErrorCode::InsufficientFunds);
+        assert_eq!(wallet.prepare_board(OnchainSendAmount::Amount {amount_sats:1},10,true, None).await.unwrap_err().code,BarkErrorCode::BelowMinimumBoardAmount);
+        assert_eq!(wallet.prepare_board(OnchainSendAmount::Amount {amount_sats:500_000},10,true, None).await.unwrap_err().code,BarkErrorCode::InsufficientFunds);
         assert_eq!(files(directory.path()),before);
-        let preview = wallet.prepare_board(OnchainSendAmount::DrainAll,10,true).await.unwrap();
+        let preview = wallet.prepare_board(OnchainSendAmount::DrainAll,10,true, None).await.unwrap();
         assert_eq!(preview.inputs.len(),12);
         assert_eq!(preview.gross_sats+preview.onchain_fee_sats,120_000);
         assert_eq!(preview.net_sats+preview.ark_fee_sats,preview.gross_sats);
@@ -83,7 +83,7 @@ fn live_prepared_board_exact_fees_reservations_status_and_cancel_reopen() {
         assert_eq!(wallet.submit_prepared_board(preview.id).await.unwrap_err().code,BarkErrorCode::PreparedTransactionNotFound);
         // Legacy board_all above reveals a key; take a fresh no-write snapshot.
         let before = files(directory.path());
-        let prepared = wallet.prepare_board(OnchainSendAmount::DrainAll,10,true).await.unwrap();
+        let prepared = wallet.prepare_board(OnchainSendAmount::DrainAll,10,true, None).await.unwrap();
         assert_eq!(files(directory.path()),before);
         let connection = rusqlite::Connection::open(directory.path().join("db.sqlite")).unwrap();
         connection.execute_batch("CREATE TRIGGER fail_board BEFORE INSERT ON bark_movements BEGIN SELECT RAISE(ABORT, 'board movement write failure'); END;").unwrap();
@@ -187,7 +187,7 @@ fn live_board_rejects_external_spend_and_claimed_exit_survives_reopen() {
         other.new_address().await.unwrap();
         other.sync().await.unwrap();
         let preview = wallet
-            .prepare_board(OnchainSendAmount::DrainAll, 1, true)
+            .prepare_board(OnchainSendAmount::DrainAll, 1, true, None)
             .await
             .unwrap();
         let destination = regtest(&["bcli", "getnewaddress"]);
@@ -213,6 +213,7 @@ fn live_board_rejects_external_spend_and_claimed_exit_survives_reopen() {
                 },
                 1,
                 true,
+                None,
             )
             .await
             .unwrap();
@@ -226,7 +227,7 @@ fn live_board_rejects_external_spend_and_claimed_exit_survives_reopen() {
         wallet.sync().await.unwrap();
         onchain.sync().await.unwrap();
         let id = result.vtxo_ids[0].clone();
-        let reserved = wallet.prepare_board(OnchainSendAmount::DrainAll, 1, true).await.unwrap();
+        let reserved = wallet.prepare_board(OnchainSendAmount::DrainAll, 1, true, None).await.unwrap();
         let before_cpfp: Vec<_> = onchain.transactions().await.unwrap().into_iter().map(|tx| tx.txid).collect();
         wallet.start_exit_for_vtxos(vec![id.clone()]).await.unwrap();
         let blocked = wallet.progress_exits(Some(1)).await.unwrap();
@@ -409,7 +410,7 @@ fn live_prepared_board_rejects_reorg_spend_below_cached_tip() {
         node.mine(5);
         onchain.sync().await.unwrap();
         let preview = wallet
-            .prepare_board(OnchainSendAmount::DrainAll, 1, true)
+            .prepare_board(OnchainSendAmount::DrainAll, 1, true, None)
             .await
             .unwrap();
         let invalidated = node.rpc(&["getblockhash", &(funding_height + 1).to_string()]);
@@ -465,7 +466,7 @@ fn live_prepared_board_rejects_reorg_spend_below_cached_tip() {
         let before = files(directory.path());
         assert_eq!(
             wallet
-                .prepare_board(OnchainSendAmount::DrainAll, 1, true)
+                .prepare_board(OnchainSendAmount::DrainAll, 1, true, None)
                 .await
                 .unwrap_err()
                 .code,
@@ -487,5 +488,104 @@ fn live_prepared_board_rejects_reorg_spend_below_cached_tip() {
             .unwrap();
         onchain.discard_prepared(spend.id).await.unwrap();
         println!("101-input board rejection left no write or leaked reservation");
+    });
+}
+
+#[test]
+fn live_prepared_board_never_spends_excluded_outpoints() {
+    if std::env::var("BARK_REGTEST").as_deref() != Ok("1") {
+        return;
+    }
+    tokio::runtime::Runtime::new().unwrap().block_on(async {
+        let directory = tempfile::tempdir().unwrap();
+        let mnemonic = generate_mnemonic().unwrap();
+        let onchain = OnchainWallet::default(
+            Network::Regtest,
+            mnemonic.clone(),
+            config(),
+            directory.path().to_str().unwrap().into(),
+        )
+        .await
+        .unwrap();
+        let wallet = Wallet::open_with_onchain(
+            Network::Regtest,
+            mnemonic,
+            config(),
+            args(directory.path()),
+            &onchain,
+        )
+        .await
+        .unwrap();
+        let address = onchain.new_address().await.unwrap();
+        regtest(&["send-to", &address, "0.002"]);
+        regtest(&["send-to", &address, "0.0006"]);
+        regtest(&["generate", "1"]);
+        onchain.sync().await.unwrap();
+        let utxos = onchain.utxos().await.unwrap();
+        let utxo = |sats: u64| {
+            utxos
+                .iter()
+                .find_map(|utxo| match utxo {
+                    OnchainUtxo::Local {
+                        outpoint,
+                        amount_sats,
+                        ..
+                    } if *amount_sats == sats => Some(outpoint.clone()),
+                    _ => None,
+                })
+                .unwrap()
+        };
+        let (big, small) = (utxo(200_000), utxo(60_000));
+        let amount = OnchainSendAmount::Amount {
+            amount_sats: 50_000,
+        };
+        // Largest-first selection is what an unconstrained board would spend.
+        let unconstrained = wallet
+            .prepare_board(amount.clone(), 1, true, None)
+            .await
+            .unwrap();
+        assert!(
+            unconstrained.inputs.contains(&big),
+            "{:?}",
+            unconstrained.inputs
+        );
+        wallet
+            .discard_prepared_board(unconstrained.id)
+            .await
+            .unwrap();
+        let ignored = vec![
+            big.clone(),
+            OutPoint {
+                txid: "not a txid".into(),
+                vout: 0,
+            },
+            OutPoint {
+                txid: "11".repeat(32),
+                vout: 3,
+            },
+        ];
+        let excluded = wallet
+            .prepare_board(amount, 1, true, Some(ignored.clone()))
+            .await
+            .unwrap();
+        assert_eq!(excluded.inputs, vec![small.clone()]);
+        wallet.discard_prepared_board(excluded.id).await.unwrap();
+        let drained = wallet
+            .prepare_board(OnchainSendAmount::DrainAll, 1, true, Some(ignored.clone()))
+            .await
+            .unwrap();
+        assert_eq!(drained.inputs, vec![small]);
+        wallet.discard_prepared_board(drained.id).await.unwrap();
+        let too_much = OnchainSendAmount::Amount {
+            amount_sats: 100_000,
+        };
+        assert_eq!(
+            wallet
+                .prepare_board(too_much, 1, true, Some(ignored))
+                .await
+                .unwrap_err()
+                .code,
+            BarkErrorCode::InsufficientFunds
+        );
     });
 }

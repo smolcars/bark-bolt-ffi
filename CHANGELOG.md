@@ -45,3 +45,14 @@ the typed code.
 **Migration:** code that constructs `EmergencyExitFeeEstimate` passes
 `excludedVtxos`. Show `excludedVtxos` next to an "exit all" estimate; those
 funds need a refresh before they can be exited.
+
+### `prepareBoard` excludes caller-chosen coins
+
+`prepareBoard(amount:feeRateSatPerVb:confirmedOnly:excludedOutpoints:)` takes
+an optional `excludedOutpoints: [OutPoint]?` (Kotlin `List<OutPoint>?`,
+default `nil`/`null`). Coin selection never spends those outpoints; with the
+rest of the wallet it fails with the usual `InsufficientFunds`. Malformed
+txids and outpoints the wallet does not own are ignored, not errors.
+
+**Migration:** none required; existing calls keep their behaviour. Replace
+"discard and retry lower" loops with one call that passes the protected coins.

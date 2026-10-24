@@ -819,16 +819,24 @@ impl Wallet {
     // ------------------------------------------------------------------------
 
     /// Build/sign without storing or broadcasting. IDs and locks are process-local.
+    /// Coin selection never spends `excluded_outpoints`; entries that are malformed or
+    /// not this wallet's coins are ignored rather than rejected.
     pub async fn prepare_board(
         &self,
         amount: types::OnchainSendAmount,
         fee_rate_sat_per_vb: u64,
         confirmed_only: bool,
+        #[boltffi::default(None)] excluded_outpoints: Option<Vec<types::OutPoint>>,
     ) -> Result<types::PreparedBoard, BarkError> {
         let mut handoff = self
             .run(|core| async move {
                 let board = core
-                    .prepare_board(amount, fee_rate_sat_per_vb, confirmed_only)
+                    .prepare_board(
+                        amount,
+                        fee_rate_sat_per_vb,
+                        confirmed_only,
+                        excluded_outpoints.unwrap_or_default(),
+                    )
                     .await?;
                 Ok::<_, BarkError>(PreparedBoardHandoff {
                     board: Some(board),

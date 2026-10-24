@@ -55,6 +55,7 @@ impl Wallet {
         amount: types::OnchainSendAmount,
         fee_rate_sat_per_vb: u64,
         confirmed_only: bool,
+        excluded_outpoints: Vec<types::OutPoint>,
     ) -> Result<types::PreparedBoard, BarkError> {
         let fee_rate = super::prepared_onchain::fee_rate(fee_rate_sat_per_vb)?;
         let owner = self.board_owner.clone().ok_or_else(unsupported)?;
@@ -106,7 +107,11 @@ impl Wallet {
         let state = (&mut *guard as &mut dyn std::any::Any)
             .downcast_mut::<WalletState>()
             .ok_or_else(unsupported)?;
-        let unavailable = state.pending_board_inputs().await?;
+        let mut unavailable = state.pending_board_inputs().await?;
+        // Unparseable or foreign outpoints cannot be selected anyway, so they are ignored.
+        unavailable.extend(excluded_outpoints.iter().filter_map(|point| {
+            Some(bitcoin::OutPoint::new(point.txid.parse().ok()?, point.vout))
+        }));
         let prepared = state.prepare(address, amount, fee_rate, confirmed_only, &unavailable)?;
         // Failures after coin selection must release their process-local locks too.
         let checked = (|| {
