@@ -232,19 +232,43 @@ public struct StateChangeEvent: Hashable, Equatable, Sendable {
 public struct BarkError: Hashable, Equatable, Sendable, Error {
     public var message: String
     public var code: BarkErrorCode
+    /// The VTXO an exit error refers to, when Bark names one.
+    public var vtxoId: String?
+    /// Sats an exit needs, for `ExitInsufficientConfirmedFunds`.
+    public var neededSats: UInt64?
+    /// Confirmed sats available, for `ExitInsufficientConfirmedFunds`.
+    public var availableSats: UInt64?
 
-    public init(message: String, code: BarkErrorCode = BarkErrorCode.other) {
+    public init(
+        message: String,
+        code: BarkErrorCode = BarkErrorCode.other,
+        vtxoId: String? = nil,
+        neededSats: UInt64? = nil,
+        availableSats: UInt64? = nil
+    ) {
         self.message = message
         self.code = code
+        self.vtxoId = vtxoId
+        self.neededSats = neededSats
+        self.availableSats = availableSats
     }
 
     @inlinable static func decode(from reader: inout WireReader) -> BarkError {
-        BarkError(message: reader.readString(), code: BarkErrorCode(rawValue: reader.readI32())!)
+        BarkError(
+            message: reader.readString(),
+            code: BarkErrorCode(rawValue: reader.readI32())!,
+            vtxoId: reader.readOptional { reader in reader.readString() },
+            neededSats: reader.readOptional { reader in reader.readU64() },
+            availableSats: reader.readOptional { reader in reader.readU64() }
+        )
     }
 
     @inlinable func encode(to writer: inout WireWriter) {
         writer.writeString(self.message)
         writer.writeI32(self.code.rawValue)
+        writer.writeOptional(self.vtxoId) { writer, boltffiValue0 in writer.writeString(boltffiValue0) }
+        writer.writeOptional(self.neededSats) { writer, boltffiValue0 in writer.writeU64(boltffiValue0) }
+        writer.writeOptional(self.availableSats) { writer, boltffiValue0 in writer.writeU64(boltffiValue0) }
     }
 }
 
@@ -850,39 +874,81 @@ public struct EmergencyExitFeeEstimate: Hashable, Equatable, Sendable {
     /// Number of exit transactions that still need to be broadcast and
     /// CPFP-bumped. Already-confirmed tree transactions are not counted.
     public var txsToBroadcast: UInt64
+    /// VTXOs a whole-wallet estimate (empty `vtxo_ids`) left out because bark
+    /// would not exit them. Always empty when ids were given.
+    public var excludedVtxos: [ExcludedExitVtxo]
 
     public init(
         exitBroadcastFeeSats: UInt64,
         claimFeeSats: UInt64,
         totalFeeSats: UInt64,
         feeRateSatPerVb: UInt64,
-        txsToBroadcast: UInt64
+        txsToBroadcast: UInt64,
+        excludedVtxos: [ExcludedExitVtxo]
     ) {
         self.exitBroadcastFeeSats = exitBroadcastFeeSats
         self.claimFeeSats = claimFeeSats
         self.totalFeeSats = totalFeeSats
         self.feeRateSatPerVb = feeRateSatPerVb
         self.txsToBroadcast = txsToBroadcast
+        self.excludedVtxos = excludedVtxos
     }
 
-    @usableFromInline init(fromC c: ___EmergencyExitFeeEstimate) {
-        self.init(
-            exitBroadcastFeeSats: c.exit_broadcast_fee_sats,
-            claimFeeSats: c.claim_fee_sats,
-            totalFeeSats: c.total_fee_sats,
-            feeRateSatPerVb: c.fee_rate_sat_per_vb,
-            txsToBroadcast: c.txs_to_broadcast
+    @inlinable static func decode(from reader: inout WireReader) -> EmergencyExitFeeEstimate {
+        EmergencyExitFeeEstimate(
+            exitBroadcastFeeSats: reader.readU64(),
+            claimFeeSats: reader.readU64(),
+            totalFeeSats: reader.readU64(),
+            feeRateSatPerVb: reader.readU64(),
+            txsToBroadcast: reader.readU64(),
+            excludedVtxos: reader.readArray { reader in ExcludedExitVtxo.decode(from: &reader) }
         )
     }
 
-    @usableFromInline var cValue: ___EmergencyExitFeeEstimate {
-        ___EmergencyExitFeeEstimate(
-            exit_broadcast_fee_sats: exitBroadcastFeeSats,
-            claim_fee_sats: claimFeeSats,
-            total_fee_sats: totalFeeSats,
-            fee_rate_sat_per_vb: feeRateSatPerVb,
-            txs_to_broadcast: txsToBroadcast
+    @inlinable func encode(to writer: inout WireWriter) {
+        writer.writeU64(self.exitBroadcastFeeSats)
+        writer.writeU64(self.claimFeeSats)
+        writer.writeU64(self.totalFeeSats)
+        writer.writeU64(self.feeRateSatPerVb)
+        writer.writeU64(self.txsToBroadcast)
+        writer.writeArray(self.excludedVtxos) { writer, boltffiValue0 in boltffiValue0.encode(to: &writer) }
+    }
+}
+
+/// A VTXO left out of a whole-wallet exit estimate, and why.
+public struct ExcludedExitVtxo: Hashable, Equatable, Sendable {
+    public var vtxoId: String
+    public var amountSats: UInt64
+    /// Usually `ExitNonStandardVtxo`; `Other` if the VTXO could not be loaded.
+    public var code: BarkErrorCode
+    public var message: String
+
+    public init(
+        vtxoId: String,
+        amountSats: UInt64,
+        code: BarkErrorCode,
+        message: String
+    ) {
+        self.vtxoId = vtxoId
+        self.amountSats = amountSats
+        self.code = code
+        self.message = message
+    }
+
+    @inlinable static func decode(from reader: inout WireReader) -> ExcludedExitVtxo {
+        ExcludedExitVtxo(
+            vtxoId: reader.readString(),
+            amountSats: reader.readU64(),
+            code: BarkErrorCode(rawValue: reader.readI32())!,
+            message: reader.readString()
         )
+    }
+
+    @inlinable func encode(to writer: inout WireWriter) {
+        writer.writeString(self.vtxoId)
+        writer.writeU64(self.amountSats)
+        writer.writeI32(self.code.rawValue)
+        writer.writeString(self.message)
     }
 }
 
@@ -1424,22 +1490,23 @@ public struct ExitVtxo: Hashable, Equatable, Sendable {
 public struct ExitProgressStatus: Hashable, Equatable, Sendable {
     public var vtxoId: String
     public var state: ExitState
-    public var error: String?
+    /// Typed like errors thrown by exit calls; `code` tells permanent from transient.
+    public var error: BarkError?
 
-    public init(vtxoId: String, state: ExitState, error: String?) {
+    public init(vtxoId: String, state: ExitState, error: BarkError?) {
         self.vtxoId = vtxoId
         self.state = state
         self.error = error
     }
 
     @inlinable static func decode(from reader: inout WireReader) -> ExitProgressStatus {
-        ExitProgressStatus(vtxoId: reader.readString(), state: ExitState.decode(from: &reader), error: reader.readOptional { reader in reader.readString() })
+        ExitProgressStatus(vtxoId: reader.readString(), state: ExitState.decode(from: &reader), error: reader.readOptional { reader in BarkError.decode(from: &reader) })
     }
 
     @inlinable func encode(to writer: inout WireWriter) {
         writer.writeString(self.vtxoId)
         self.state.encode(to: &writer)
-        writer.writeOptional(self.error) { writer, boltffiValue0 in writer.writeString(boltffiValue0) }
+        writer.writeOptional(self.error) { writer, boltffiValue0 in boltffiValue0.encode(to: &writer) }
     }
 }
 
@@ -2384,6 +2451,21 @@ public enum BarkErrorCode: Int32, Hashable, Sendable, CaseIterable {
     case preparedBoardChanged = 12
     /// The input is no payment string Bark understands.
     case invalidPaymentRequest = 13
+    case exitNonStandardVtxo = 14
+    case exitDustLimit = 15
+    case exitVtxoAlreadySpent = 16
+    case exitVtxoAlreadyExited = 17
+    case exitVtxoSwept = 18
+    case exitUnknownVtxo = 19
+    case exitCyclicTransactions = 20
+    case exitMissingAnchorOutput = 21
+    case exitTransactionRetrievalFailure = 22
+    case exitTipRetrievalFailure = 23
+    case exitBlockRetrievalFailure = 24
+    case exitAncestorRetrievalFailure = 25
+    /// Confirmed onchain funds cannot pay the exit's CPFP fees. See
+    /// `BarkError.neededSats` and `BarkError.availableSats`.
+    case exitInsufficientConfirmedFunds = 26
 
     @usableFromInline init(fromC c: Int32) {
         self = BarkErrorCode(rawValue: c)!
@@ -2994,6 +3076,9 @@ public enum BroadcastOutcome: Hashable, Equatable, Sendable {
     case accepted
     case failed(reason: String)
     case notAttempted(reason: String)
+    /// The board failed after Bark may have recorded it. The preparation is consumed:
+    /// sync, then check `pendingBoards()` and history before preparing again.
+    case uncertain(reason: String)
 
     @inlinable static func decode(from reader: inout WireReader) -> BroadcastOutcome {
         let tag = reader.readU32()
@@ -3004,6 +3089,8 @@ public enum BroadcastOutcome: Hashable, Equatable, Sendable {
             return .failed(reason: reader.readString())
         case 2:
             return .notAttempted(reason: reader.readString())
+        case 3:
+            return .uncertain(reason: reader.readString())
         default:
             fatalError("Invalid BroadcastOutcome tag: \(tag)")
         }
@@ -3018,6 +3105,9 @@ public enum BroadcastOutcome: Hashable, Equatable, Sendable {
             writer.writeString(reason)
         case let .notAttempted(reason):
             writer.writeU32(2)
+            writer.writeString(reason)
+        case let .uncertain(reason):
+            writer.writeU32(3)
             writer.writeString(reason)
         }
     }
@@ -5861,16 +5951,28 @@ public final class Wallet {
     }
 
     /// Build/sign without storing or broadcasting. IDs and locks are process-local.
-    public func prepareBoard(amount: OnchainSendAmount, feeRateSatPerVb: UInt64, confirmedOnly: Bool) async throws -> PreparedBoard {
+    /// Coin selection never spends `excluded_outpoints`; entries that are malformed or
+    /// not this wallet's coins are ignored rather than rejected.
+    public func prepareBoard(
+        amount: OnchainSendAmount,
+        feeRateSatPerVb: UInt64,
+        confirmedOnly: Bool,
+        excludedOutpoints: [OutPoint]? = nil
+    ) async throws -> PreparedBoard {
         let boltffiAmountBytes = boltffiEncode { boltffiAmountWriter in amount.encode(to: &boltffiAmountWriter) }
         let boltffiFuture = boltffiAmountBytes.withUnsafeBufferPointer { boltffiAmountBuffer in
-            return boltffi_method_class_bark_bolt_ffi_ffi_wallet_wallet_prepare_board(
-                self.handle,
-                boltffiAmountBuffer.baseAddress!,
-                UInt(boltffiAmountBuffer.count),
-                feeRateSatPerVb,
-                confirmedOnly
-            )
+            let boltffiExcludedOutpointsBytes = boltffiEncode { boltffiExcludedOutpointsWriter in boltffiExcludedOutpointsWriter.writeOptional(excludedOutpoints) { boltffiExcludedOutpointsWriter, boltffiValue0 in boltffiExcludedOutpointsWriter.writeArray(boltffiValue0) { boltffiExcludedOutpointsWriter, boltffiValue1 in boltffiValue1.encode(to: &boltffiExcludedOutpointsWriter) } } }
+            return boltffiExcludedOutpointsBytes.withUnsafeBufferPointer { boltffiExcludedOutpointsBuffer in
+                return boltffi_method_class_bark_bolt_ffi_ffi_wallet_wallet_prepare_board(
+                    self.handle,
+                    boltffiAmountBuffer.baseAddress!,
+                    UInt(boltffiAmountBuffer.count),
+                    feeRateSatPerVb,
+                    confirmedOnly,
+                    boltffiExcludedOutpointsBuffer.baseAddress!,
+                    UInt(boltffiExcludedOutpointsBuffer.count)
+                )
+            }
         }
         return try await boltffiAsyncCall(
             futureHandle: boltffiFuture,
@@ -7180,7 +7282,7 @@ public final class Wallet {
             cancel: boltffi_async_method_class_bark_bolt_ffi_ffi_wallet_wallet_estimate_emergency_exit_fee_cancel,
             free: boltffi_async_method_class_bark_bolt_ffi_ffi_wallet_wallet_estimate_emergency_exit_fee_free
         ) { boltffiFuture, boltffiStatus in
-            var boltffiResult: ___EmergencyExitFeeEstimate = ___EmergencyExitFeeEstimate()
+            var boltffiResult: FfiBuf_u8 = FfiBuf_u8()
             let boltffiError = boltffi_async_method_class_bark_bolt_ffi_ffi_wallet_wallet_estimate_emergency_exit_fee_complete(boltffiFuture, boltffiStatus, &boltffiResult)
             if boltffiError.ptr != nil || Int(boltffiError.len) != 0 {
                 defer { boltffi_free_buf(boltffiError) }
@@ -7190,7 +7292,8 @@ public final class Wallet {
             guard boltffiStatusCode == 0 else {
                 throw FfiError(message: "FFI failed in async completion with code \(boltffiStatusCode)")
             }
-            return EmergencyExitFeeEstimate(fromC: boltffiResult)
+            defer { boltffi_free_buf(boltffiResult) }
+            return boltffiDecodeOwnedBuf(boltffiResult.ptr, Int(boltffiResult.len)) { boltffiReader in EmergencyExitFeeEstimate.decode(from: &boltffiReader) }
         }
     }
 

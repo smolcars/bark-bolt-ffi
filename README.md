@@ -17,7 +17,7 @@ transaction/PSBT validation, SQLite persistence and native datadir locking.
 
 Swift: add `https://github.com/smolcars/bark-bolt-ffi` in Xcode and link
 `BarkBoltFFI`. The root SwiftPM package uses the versioned, checksummed release
-XCFramework. Kotlin: build the AAR/JVM JAR below, or download [versioned release artifacts](https://github.com/smolcars/bark-bolt-ffi/releases/tag/v0.6.0);
+XCFramework. Kotlin: build the AAR/JVM JAR below, or download [versioned release artifacts](https://github.com/smolcars/bark-bolt-ffi/releases/tag/v0.7.0);
 [the migration guide](docs/migration.md) documents local Maven publication.
 
 ## Local build

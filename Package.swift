@@ -16,7 +16,7 @@ let package = Package(
     targets: [
         .binaryTarget(
             name: "BarkBoltFFIFFIBinary",
-            url: "https://github.com/smolcars/bark-bolt-ffi/releases/download/v0.6.0/BarkBoltFFI.xcframework.zip", checksum: "72c95272f4d27295b3a2b9e3c2002ada95c8c97f6fbcd9924c9e81af0e6ddca5"
+            url: "https://github.com/smolcars/bark-bolt-ffi/releases/download/v0.7.0/BarkBoltFFI.xcframework.zip", checksum: "fe1b17f7308f8fa473e4e55040e4bbfb5bad2120b117947ace4ae5af649fa435"
         ),
         .target(
             name: "BarkBoltFFIFFI",

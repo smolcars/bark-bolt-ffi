@@ -87,9 +87,9 @@ different claims. Record them separately; do not mark one from evidence of anoth
 - [x] Confirmed-only parents re-checked at first submit of boards and prepared sends.
 - [x] `BroadcastOutcome.uncertain` when bark may have recorded a failed board.
 - [x] Rust/Swift/Kotlin live RegTest and two-round GPT-6 Astra review.
-- [ ] Main CI full matrix.
-- [ ] Stage CI artifacts, move install docs to 0.7.0, publish v0.7.0 and notify the
-      Noah rewrite thread (waits for approval).
+- [x] Main CI full matrix ([run 40132677901](https://github.com/smolcars/bark-bolt-ffi/actions/runs/40132677901)); example apps on task-owned devices.
+- [x] Stage CI artifacts and move install docs to 0.7.0.
+- [ ] Publish v0.7.0 and notify the Noah rewrite thread (waits for approval).
 
 Engineering plan: [Noah FFI fixes](plans/26-noah-ffi-fixes.md).
 [Execution evidence](validation/noah-ffi-fixes-2026-10-24.md). Migration notes: [CHANGELOG](../CHANGELOG.md).

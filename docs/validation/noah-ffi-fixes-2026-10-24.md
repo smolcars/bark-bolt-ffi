@@ -36,8 +36,25 @@ omitted locked VTXOs; confirmed-only check blocked rebroadcast of an evicted,
 recorded send; the existing reservation test failed once its stopped chain
 proxy made the new status query error. Round 2: no findings.
 
+## Apps
+
+`just test-regtest --extended` on a task-created simulator (`Bark v070
+iPhone`, iPhone 18 Pro, iOS 27.0) and AVD (`bark-v070`, API 35 arm64,
+`emulator-5580`): `"passed": true`, 32 steps per platform, including the exit
+estimate, start, progress and drain. The booted `iPhone 18 Pro` and
+`Noah Link iPhone` simulators were not touched.
+
+## Hosted CI
+
+Main run [40132677901](https://github.com/smolcars/bark-bolt-ffi/actions/runs/40132677901)
+at `6961e82` passed `rust`, `apple` (Swift contracts, iOS app tests) and
+`android` (Kotlin contracts and packaged JAR, apps, live RegTest Rust tests
+on the pinned `nightly-2026-10-22` images). Its Apple artifact 12575299367
+(sha256 `c095818a…f0e8`) was staged with
+[v070-stage-ci.py](v070-stage-ci.py); XCFramework sha256
+`fe1b17f7308f8fa473e4e55040e4bbfb5bad2120b117947ace4ae5af649fa435`.
+
 ## Limits
 
-Example apps were not rerun locally; the item changes are SDK-internal or
-additive for the apps. Hosted CI and release publication are recorded
+Physical and minimum-OS devices were not run. Publication is recorded
 separately.
