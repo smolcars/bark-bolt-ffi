@@ -1,5 +1,5 @@
 {
-  "archive_sha256": "fe1b17f7308f8fa473e4e55040e4bbfb5bad2120b117947ace4ae5af649fa435",
+  "archive_sha256": "fd411e82ccb43c1cf2fcb9b0feb3bc7cb2cc0c8cc0ff4518165c6a2ebe70ede8",
   "bark": "0.8.0",
   "bark_revision": "959a489ff4934b181783b41c7d3ee68d85b95cbf",
   "boltffi": "0.31.1",
@@ -13,9 +13,9 @@
   },
   "minimum_ios": "16.0",
   "minimum_macos": "13.0",
-  "package_sha256": "dda94992f58ef53f85e7ed85dbb2b46faac0d793cefe4ba912bb49ff7918f82f",
+  "package_sha256": "d1227bb4c753d6b3e1846545fa52b0d2413cc22bae92b9121ab35dd541e02238",
   "profile": "release",
   "rust": "1.99.1",
-  "source_sha256": "e5c9dab63c18659eceb02cf370dd2ba959ce10bd62fc8e831e4d1329b2f2afa4",
-  "version": "0.7.0"
+  "source_sha256": "425d0575bf6ab7cd84670f7020d85226f0ae7459e07e17d91bb21fd69e4eff46",
+  "version": "0.7.1"
 }

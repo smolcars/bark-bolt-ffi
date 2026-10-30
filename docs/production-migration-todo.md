@@ -91,8 +91,11 @@ change, so a patch release. Upstream wallet logic and persistence are untouched.
 - [x] `listAllExits` skips exit rows whose VTXO is gone, with or without transactions.
 - [x] `getExitStatus` returns nil for those IDs; Noah's journal check reaches them.
 - [x] Live RegTest regression test, including a failed read staying an error.
-- [ ] Main CI full matrix.
-- [ ] Stage CI artifacts, move install docs to 0.7.1 and publish v0.7.1.
+- [x] Main CI full matrix ([run 41139900213](https://github.com/smolcars/bark-bolt-ffi/actions/runs/41139900213)).
+- [x] Stage CI artifacts and move install docs to 0.7.1.
+- [ ] Publish v0.7.1.
+
+[Execution evidence](validation/dropped-vtxo-exits-2026-10-30.md).
 
 ### 25 — Noah exit, board and preparation fixes (v0.7.0)
 
