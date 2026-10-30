@@ -79,6 +79,21 @@ different claims. Record them separately; do not mark one from evidence of anoth
 
 ## Tasks
 
+### 26 — Exit reads survive a dropped VTXO (v0.7.1)
+
+Plan: in `src/core/wallet.rs`, `list_all_exits` and `get_exit_status` share one
+helper that reads the VTXO before asking Bark for the exit, because Bark's own
+transaction read fails on a dropped VTXO. Bark has no typed "not found" and its
+error text is not matched: a failed by-ID read counts as absent only when the
+full VTXO list also lacks the ID, and any other read failure propagates. No API
+change, so a patch release. Upstream wallet logic and persistence are untouched.
+
+- [x] `listAllExits` skips exit rows whose VTXO is gone, with or without transactions.
+- [x] `getExitStatus` returns nil for those IDs; Noah's journal check reaches them.
+- [x] Live RegTest regression test, including a failed read staying an error.
+- [ ] Main CI full matrix.
+- [ ] Stage CI artifacts, move install docs to 0.7.1 and publish v0.7.1.
+
 ### 25 — Noah exit, board and preparation fixes (v0.7.0)
 
 - [x] Typed emergency-exit errors; `ExitProgressStatus.error` as `BarkError?`.

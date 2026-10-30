@@ -1607,3 +1607,68 @@ mod noah_p1_tests {
         });
     }
 }
+
+#[cfg(test)]
+mod dropped_vtxo_exit_tests {
+    use super::*;
+    fn regtest(args: &[&str]) -> String {
+        let output = std::process::Command::new("bash")
+            .arg(concat!(env!("CARGO_MANIFEST_DIR"), "/scripts/ark-dev.sh"))
+            .args(args)
+            .output()
+            .unwrap();
+        assert!(
+            output.status.success(),
+            "RegTest helper failed: {}",
+            String::from_utf8_lossy(&output.stderr)
+        );
+        String::from_utf8(output.stdout).unwrap().trim().to_string()
+    }
+    /// Dropping a VTXO leaves its exit row behind, and bark can't cancel that row.
+    #[test]
+    fn listing_exits_survives_a_dropped_vtxo() {
+        if std::env::var("BARK_REGTEST").as_deref() != Ok("1") {
+            return;
+        }
+        crate::ffi::runtime::TOKIO_RT.block_on(async {
+            let directory = tempfile::tempdir().unwrap();
+            let datadir: String = directory.path().to_string_lossy().into();
+            let config: Config = serde_json::from_value(serde_json::json!({"server_address":crate::ffi::regtest_url("ARK_PORT","3635"),"bitcoind_address":crate::ffi::regtest_url("BITCOIN_PORT","19443"),"bitcoind_user":"second","bitcoind_pass":"ark"})).unwrap();
+            let mnemonic = crate::generate_mnemonic().unwrap();
+            let args = || WalletOpenArgs { run_daemon:false,datadir:datadir.clone(),create_if_not_exists:true,create_without_server:true,skip_recovery:true };
+            let onchain = OnchainWallet::default(Network::Regtest,mnemonic.clone(),config.clone(),datadir.clone()).await.unwrap();
+            let wallet = Wallet::open_with_onchain(Network::Regtest,mnemonic.clone(),config.clone(),args(),&onchain).await.unwrap();
+            regtest(&["send-to",&onchain.new_address().await.unwrap(),"0.005"]);
+            regtest(&["generate","1"]);
+            onchain.sync().await.unwrap();
+            wallet.board_amount(100_000).await.unwrap();
+            regtest(&["generate","1"]);
+            onchain.sync().await.unwrap();
+            wallet.board_amount(50_000).await.unwrap();
+            regtest(&["generate","6"]);
+            wallet.sync().await.unwrap();
+            let vtxos = wallet.spendable_vtxos().await.unwrap();
+            assert_eq!(vtxos.len(),2);
+            let (dropped,kept) = (vtxos[0].id.clone(),vtxos[1].id.clone());
+            let kept_amount = vtxos[1].amount_sats;
+            wallet.start_exit_for_vtxos(vec![dropped.clone(),kept.clone()]).await.unwrap();
+            assert_eq!(wallet.list_all_exits(true,false).await.unwrap().len(),2);
+            wallet.dangerous_drop_vtxo(dropped.clone()).await.unwrap();
+            drop(wallet);
+            let reopened = Wallet::open_with_onchain(Network::Regtest,mnemonic,config,args(),&onchain).await.unwrap();
+            assert!(!reopened.cancel_exit(dropped.clone()).await.unwrap().canceled);
+            // With transactions, as Android reads them, bark itself fails on the dropped row.
+            for transactions in [false,true] {
+                let exits = reopened.list_all_exits(true,transactions).await.unwrap();
+                assert_eq!(exits.iter().map(|e| (e.vtxo_id.clone(),e.amount_sats)).collect::<Vec<_>>(),vec![(kept.clone(),kept_amount)]);
+                assert_eq!(exits[0].transactions.is_empty(),!transactions);
+                assert!(reopened.get_exit_status(dropped.clone(),true,transactions).await.unwrap().is_none());
+                assert_eq!(reopened.get_exit_status(kept.clone(),true,transactions).await.unwrap().unwrap().amount_sats,kept_amount);
+            }
+            // A failed read must not pass for a dropped VTXO and hide a live exit.
+            rusqlite::Connection::open(directory.path().join("db.sqlite")).unwrap().execute_batch("DROP VIEW vtxo_view").unwrap();
+            assert!(reopened.list_all_exits(true,false).await.is_err());
+            assert!(reopened.get_exit_status(kept,true,false).await.is_err());
+        });
+    }
+}

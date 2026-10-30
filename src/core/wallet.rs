@@ -1668,22 +1668,55 @@ impl Wallet {
         include_history: bool,
         include_transactions: bool,
     ) -> Result<Vec<types::ExitTransactionStatus>, BarkError> {
-        let statuses = self
-            .inner
-            .exit_mgr()
-            .list_all(include_history, include_transactions)
-            .await?;
+        // Row by row: with transactions, bark fails the whole list on one dropped VTXO.
+        let statuses = self.inner.exit_mgr().list_all(false, false).await?;
         let mut result = Vec::with_capacity(statuses.len());
         for status in statuses {
-            let amount = self
-                .inner
-                .get_vtxo_by_id(status.vtxo_id)
+            match self
+                .exit_status(status.vtxo_id, include_history, include_transactions)
                 .await?
-                .amount()
-                .to_sat();
-            result.push(types::ExitTransactionStatus::from_bark(status, amount));
+            {
+                Some(status) => result.push(status),
+                None => warn!(
+                    "[EXIT] Skipping exit for VTXO {}: the VTXO is gone",
+                    status.vtxo_id
+                ),
+            }
         }
         Ok(result)
+    }
+
+    /// An exit with its VTXO's amount; `None` when there is no exit or its VTXO is gone.
+    ///
+    /// A dropped VTXO keeps its exit row, which bark can neither load, progress nor cancel: it
+    /// must not hide the real exits. Only absence counts, not a failed read.
+    async fn exit_status(
+        &self,
+        vtxo_id: VtxoId,
+        include_history: bool,
+        include_transactions: bool,
+    ) -> Result<Option<types::ExitTransactionStatus>, BarkError> {
+        let amount = match self.inner.get_vtxo_by_id(vtxo_id).await {
+            Ok(vtxo) => vtxo.amount().to_sat(),
+            Err(_)
+                if !self
+                    .inner
+                    .all_vtxos()
+                    .await?
+                    .iter()
+                    .any(|vtxo| vtxo.id() == vtxo_id) =>
+            {
+                return Ok(None)
+            }
+            Err(error) => return Err(error.into()),
+        };
+        let status = self
+            .inner
+            .exit_mgr()
+            .get_exit_status(vtxo_id, include_history, include_transactions)
+            .await
+            .context("Get exit status failed")?;
+        Ok(status.map(|status| types::ExitTransactionStatus::from_bark(status, amount)))
     }
 
     pub async fn transaction_status(
@@ -1729,26 +1762,8 @@ impl Wallet {
         include_transactions: bool,
     ) -> Result<Option<types::ExitTransactionStatus>, BarkError> {
         let vtxo_id_parsed = vtxo_id.parse::<VtxoId>().context("invalid vtxo id")?;
-
-        let exit_guard = self.inner.exit_mgr();
-        let status = exit_guard
-            .get_exit_status(vtxo_id_parsed, include_history, include_transactions)
+        self.exit_status(vtxo_id_parsed, include_history, include_transactions)
             .await
-            .context("Get exit status failed")?;
-        match status {
-            Some(status) => {
-                let amount = self
-                    .inner
-                    .get_vtxo_by_id(status.vtxo_id)
-                    .await?
-                    .amount()
-                    .to_sat();
-                Ok(Some(types::ExitTransactionStatus::from_bark(
-                    status, amount,
-                )))
-            }
-            None => Ok(None),
-        }
     }
 
     /// Build a PSBT claiming exited VTXOs to `address`.

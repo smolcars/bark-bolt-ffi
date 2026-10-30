@@ -6,6 +6,18 @@ Names use the Rust spelling: Swift lowercases the first letter
 SCREAMING_SNAKE enum constants (`BarkErrorCode.EXIT_NON_STANDARD_VTXO`) and
 class names for variants (`BroadcastOutcome.Uncertain`).
 
+## 0.7.1
+
+Bark stays at lib-0.8.0 (`959a489f`). No API change; databases open unchanged.
+
+### Exit reads survive a dropped VTXO
+
+`dangerousDropVtxo` leaves the VTXO's exit row behind, and Bark can neither
+load, progress nor cancel that row. One such row made `listAllExits` fail for
+the whole wallet and `getExitStatus` fail for that ID. `listAllExits` now skips
+the row, with or without transactions, and `getExitStatus` returns `nil`. A
+failed database read still throws, so it can't hide a live exit.
+
 ## 0.7.0 (unreleased)
 
 Bark stays at lib-0.8.0 (`959a489f`). Rebuild against the 0.7.0 bindings and
