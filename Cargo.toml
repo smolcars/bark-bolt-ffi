@@ -1,6 +1,6 @@
 [package]
 name = "bark-bolt-ffi"
-version = "0.7.1"
+version = "0.7.2"
 edition = "2021"
 license = "MIT"
 authors = ["Team Second <hello@second.tech>"]

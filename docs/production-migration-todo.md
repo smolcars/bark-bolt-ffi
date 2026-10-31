@@ -79,6 +79,19 @@ different claims. Record them separately; do not mark one from evidence of anoth
 
 ## Tasks
 
+### 27 — Quieter transport logs (v0.7.2)
+
+Plan: in `src/ffi/logger.rs`, the `log` bridge forwards only Info and above from
+the HTTP/gRPC transport crates (`h2`, `hyper`, `hyper_util`, `reqwest`,
+`rustls`, `tonic`, `tower`, ...). Bark's own records still follow `max_level`.
+No API change, so a patch release.
+
+- [x] `setLogger` drops Debug and Trace records from the transport crates.
+- [x] Unit test for the per-crate level filter.
+- [ ] Main CI full matrix.
+- [ ] Stage CI artifacts and move install docs to 0.7.2.
+- [ ] Publish v0.7.2.
+
 ### 26 — Exit reads survive a dropped VTXO (v0.7.1)
 
 Plan: in `src/core/wallet.rs`, `list_all_exits` and `get_exit_status` share one

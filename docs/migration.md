@@ -31,7 +31,7 @@ BOLTFFI="$PWD/target/tools/boltffi" scripts/build-sdk.sh android --release
 ./gradlew :sdk:android:publishToMavenLocal :sdk:jvm:publishToMavenLocal
 ```
 
-Use `mavenLocal()` with `io.github.niteshbalusu11:bark-bolt-ffi-android:0.7.1`,
+Use `mavenLocal()` with `io.github.niteshbalusu11:bark-bolt-ffi-android:0.7.2`,
 or the host-specific `bark-bolt-ffi-jvm-darwin-arm64` / `bark-bolt-ffi-jvm-linux-x86_64`
 artifact. Import `io.github.niteshbalusu11.bark.*`. The Maven POM supplies the
 coroutines dependency. The Android AAR embeds all three JNI ABIs and consumer
