@@ -88,9 +88,11 @@ No API change, so a patch release.
 
 - [x] `setLogger` drops Debug and Trace records from the transport crates.
 - [x] Unit test for the per-crate level filter.
-- [ ] Main CI full matrix.
-- [ ] Stage CI artifacts and move install docs to 0.7.2.
+- [x] Main CI full matrix ([run 41250921361](https://github.com/smolcars/bark-bolt-ffi/actions/runs/41250921361)).
+- [x] Stage CI artifacts and move install docs to 0.7.2.
 - [ ] Publish v0.7.2.
+
+[Execution evidence](validation/quieter-transport-logs-2026-10-31.md).
 
 ### 26 — Exit reads survive a dropped VTXO (v0.7.1)
 
