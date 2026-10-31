@@ -39,9 +39,30 @@ static INSTALLED: OnceCell<bool> = OnceCell::new();
 /// `clear_logger`.
 static SINK: RwLock<Option<Arc<dyn BarkLogger>>> = RwLock::new(None);
 
+/// HTTP and gRPC transport crates log every request and pooled connection at
+/// Debug and Trace. Only their Info and above reach the foreign logger.
+const TRANSPORT_CRATES: &[&str] = &[
+    "h2",
+    "hyper",
+    "hyper_util",
+    "mio",
+    "reqwest",
+    "rustls",
+    "tokio_rustls",
+    "tonic",
+    "tower",
+    "tower_http",
+    "want",
+];
+
+fn forwards(level: log::Level, target: &str, max_level: LevelFilter) -> bool {
+    let krate = target.split("::").next().unwrap_or_default();
+    level <= max_level && (level <= log::Level::Info || !TRANSPORT_CRATES.contains(&krate))
+}
+
 impl log::Log for Bridge {
     fn enabled(&self, metadata: &log::Metadata) -> bool {
-        metadata.level() <= log::max_level()
+        forwards(metadata.level(), metadata.target(), log::max_level())
     }
 
     fn log(&self, record: &log::Record) {
@@ -145,5 +166,19 @@ mod tests {
         assert_eq!(second.messages(), ["to second"]);
         assert_eq!(Arc::strong_count(&first), 1);
         assert_eq!(Arc::strong_count(&second), 1);
+    }
+
+    #[test]
+    fn transport_crates_forward_only_info_and_above() {
+        use log::Level::{Debug, Info, Trace, Warn};
+        let max = LevelFilter::Trace;
+
+        assert!(!forwards(Debug, "hyper_util::client::legacy::pool", max));
+        assert!(!forwards(Trace, "h2", max));
+        assert!(forwards(Info, "h2::proto", max));
+        assert!(forwards(Warn, "tonic::transport", max));
+        assert!(forwards(Debug, "bark::wallet", max));
+        assert!(forwards(Trace, "hyperion", max));
+        assert!(!forwards(Info, "h2", LevelFilter::Warn));
     }
 }
