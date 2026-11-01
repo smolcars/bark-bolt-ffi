@@ -7,10 +7,10 @@ supported consumer languages. The Rust core remains in this repository.
 ## Swift
 
 Add `https://github.com/smolcars/bark-bolt-ffi` in Xcode's package dependencies,
-select version 0.7.2, and link the `BarkBoltFFI` product. In a package manifest:
+select version 0.7.3, and link the `BarkBoltFFI` product. In a package manifest:
 
 ```swift
-.package(url: "https://github.com/smolcars/bark-bolt-ffi.git", exact: "0.7.2")
+.package(url: "https://github.com/smolcars/bark-bolt-ffi.git", exact: "0.7.3")
 // Target dependency:
 .product(name: "BarkBoltFFI", package: "bark-bolt-ffi")
 ```
@@ -39,10 +39,10 @@ R8 rules. JVM JARs contain the native library for the build host; choose a JAR
 matching the deployment OS/architecture. Linux CI builds on Ubuntu24.04; rebuild
 locally when targeting an older libc. Maven Central publication is separate.
 The tag build attaches versioned AAR/JAR/POM files to each GitHub release, such as
-[v0.7.2](https://github.com/smolcars/bark-bolt-ffi/releases/tag/v0.7.2);
+[v0.7.3](https://github.com/smolcars/bark-bolt-ffi/releases/tag/v0.7.3);
 verify them against its SHA256SUMS. Releases attach the Linux x86_64 JVM JAR;
-build the Darwin JVM JAR from source. Use matching v0.7.2 bindings/native binaries,
-including on Swift. 0.7.0 changed the ABI of `BarkError`, `ExitProgressStatus`, `EmergencyExitFeeEstimate` and `BroadcastOutcome`; 0.7.1 and 0.7.2 do not change it further. GitHub Actions also uploads artifacts and
+build the Darwin JVM JAR from source. Use matching v0.7.3 bindings/native binaries,
+including on Swift. 0.7.0 changed the ABI of `BarkError`, `ExitProgressStatus`, `EmergencyExitFeeEstimate` and `BroadcastOutcome`; 0.7.1, 0.7.2 and 0.7.3 do not change it further. GitHub Actions also uploads artifacts and
 example APKs. To use a downloaded AAR or JVM JAR directly, include it as a local
 file dependency and declare `org.jetbrains.kotlinx:kotlinx-coroutines-core:1.10.2`
 explicitly; local file dependencies do not resolve the attached Maven POM.
