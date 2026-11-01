@@ -35,6 +35,8 @@ default-features = false
 # Wallet dependencies
 bitcoin = { version = "0.32.7", features = ["serde", "rand", "rand-std"] }
 bip39 = { version = "2.0.0", features = ["rand"] }
+# Bark's own spec; `ChainSource` keeps its Esplora client private, so sync fetches with this one.
+bdk_esplora = { version = "0.22.1", default-features = false, features = ["std", "async-https-rustls", "tokio"] }
 anyhow = { version = "1.0", features = ["backtrace"] }
 async-trait = "0.1.83"
 serde = { version = "1.0", features = ["derive"] }
