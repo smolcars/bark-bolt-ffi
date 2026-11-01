@@ -89,9 +89,11 @@ fetched again. `balance` takes the read lock. No API change, so a patch release.
 
 - [x] `balance`, `transactions` and `utxos` don't wait for a sync's network fetch.
 - [x] Unit tests for reads during a fetch and a scan overlapped by a Bark sync.
-- [ ] Main CI full matrix.
-- [ ] Stage CI artifacts and move install docs to 0.7.3.
+- [x] Main CI full matrix ([run 41279004359](https://github.com/smolcars/bark-bolt-ffi/actions/runs/41279004359)).
+- [x] Stage CI artifacts and move install docs to 0.7.3.
 - [ ] Publish v0.7.3.
+
+[Execution evidence](validation/onchain-sync-lock-2026-11-01.md).
 
 ### 27 — Quieter transport logs (v0.7.2)
 
