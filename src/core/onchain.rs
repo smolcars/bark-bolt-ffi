@@ -1,15 +1,17 @@
-use std::collections::HashMap;
+use std::collections::{HashMap, HashSet};
 use std::path::PathBuf;
 use std::sync::{Arc, LazyLock, Weak};
 use tokio::sync::RwLock;
 
 use bark::chain::{ChainSource, ChainSourceSpec};
+use bark::onchain::bdk_wallet::{self, chain::ChainPosition};
 use bark::onchain::{OnchainWallet as BarkOnchainWallet, OnchainWalletTrait};
 use bark::persist::BarkPersister;
+use bdk_esplora::{esplora_client, EsploraAsyncExt};
 use bip39::Mnemonic;
 
 use anyhow::Context;
-use log::info;
+use log::{info, warn};
 
 use crate::config::Config;
 use crate::core::parse_address;
@@ -25,8 +27,23 @@ use crate::Network;
 pub struct OnchainWallet {
     wallet: Arc<RwLock<WalletState>>,
     chain: Arc<ChainSource>,
+    /// Same server as `chain`, for [`Self::sync`] and [`Self::initial_scan`]; `None` on bitcoind.
+    esplora: Option<esplora_client::AsyncClient>,
     /// For [`Self::send`]; neither the bdk wallet nor the trait exposes one.
     network: bitcoin::Network,
+}
+
+// bark's `OnchainWallet::sync` and `initial_wallet_scan` constants (private upstream).
+const STOP_GAP: usize = 50;
+const PARALLEL_REQS: usize = 4;
+const ONCHAIN_EVICTION_GRACE_SECS: u64 = 30;
+/// Fetches per sync or scan when bark's own sync keeps moving the tip; see [`OnchainWallet::apply`].
+const FETCH_ATTEMPTS: usize = 3;
+
+fn now_secs() -> u64 {
+    std::time::SystemTime::now()
+        .duration_since(std::time::UNIX_EPOCH)
+        .map_or(0, |elapsed| elapsed.as_secs())
 }
 
 type LiveWallets = HashMap<PathBuf, Weak<RwLock<WalletState>>>;
@@ -75,6 +92,7 @@ impl OnchainWallet {
                 db,
                 board_databases: Vec::new(),
                 operation_gate: Arc::new(tokio::sync::Mutex::new(())),
+                sync_gate: Arc::new(tokio::sync::Mutex::new(())),
                 _registration: registration.clone(),
             }));
             live.insert(registration.as_ref().clone(), Arc::downgrade(&wallet));
@@ -82,6 +100,7 @@ impl OnchainWallet {
         };
         drop(live);
 
+        let mut esplora = None;
         let chain_spec = if let Some(url) = config.bitcoind_address.as_ref() {
             use bark_bitcoin_ext::rpc::Auth;
             let auth = if let Some(cookie) = config.bitcoind_cookiefile {
@@ -102,6 +121,18 @@ impl OnchainWallet {
             }
         } else if let Some(url) = config.esplora_address {
             info!("[ONCHAIN] Using Esplora at {}", url);
+            // The URL normalisation bark's `ChainSource::new` applies.
+            let trimmed = url.trim();
+            let base = if trimmed.contains("://") {
+                trimmed.to_owned()
+            } else {
+                format!("https://{trimmed}")
+            };
+            esplora = Some(
+                esplora_client::Builder::new(base.strip_suffix('/').unwrap_or(&base))
+                    .build_async()
+                    .context("Failed to create esplora client")?,
+            );
             ChainSourceSpec::Esplora { url }
         } else {
             return Err(anyhow::anyhow!(
@@ -119,6 +150,7 @@ impl OnchainWallet {
         Ok(Self {
             wallet,
             chain,
+            esplora,
             network,
         })
     }
@@ -274,11 +306,109 @@ impl OnchainWallet {
             .into())
     }
 
+    /// On Esplora the fetch holds no wallet lock, so reads never wait for the network.
+    /// Bitcoind keeps bark's sync, which applies blocks as it streams them.
     pub async fn sync(&self) -> Result<u64, BarkError> {
-        let mut w = self.wallet.write().await;
-        w.sync(&self.chain).await.context("Sync failed")?;
-        let balance = w.wallet.balance();
-        Ok(balance.total().to_sat())
+        let Some(esplora) = &self.esplora else {
+            let mut w = self.wallet.write().await;
+            w.sync(&self.chain).await.context("Sync failed")?;
+            return Ok(w.wallet.balance().total().to_sat());
+        };
+        let gate = self.wallet.read().await.sync_gate.clone();
+        let _sync = gate.lock().await;
+        for _ in 0..FETCH_ATTEMPTS {
+            // The request bark's `OnchainWallet::sync` builds.
+            let (tip, request) = {
+                let w = self.wallet.read().await;
+                let tip = w.wallet.latest_checkpoint();
+                let min_height = tip
+                    .height()
+                    .saturating_sub(bark_bitcoin_ext::DEEPLY_CONFIRMED.to_u32());
+                let request = w
+                    .wallet
+                    .start_sync_with_revealed_spks_at(now_secs())
+                    .outpoints(w.wallet.list_unspent().iter().map(|o| o.outpoint))
+                    .txids(w.wallet.transactions().filter_map(|tx| {
+                        let fresh = match tx.chain_position {
+                            ChainPosition::Unconfirmed { .. } => true,
+                            ChainPosition::Confirmed { anchor, .. } => {
+                                anchor.block_id.height >= min_height
+                            }
+                        };
+                        fresh.then_some(tx.tx_node.txid)
+                    }));
+                (tip.block_id(), request)
+            };
+            let update = esplora
+                .sync(request, PARALLEL_REQS)
+                .await
+                .context("Sync failed")?;
+            if let Some(balance) = self.apply(tip, update.into()).await? {
+                return Ok(balance);
+            }
+        }
+        Err(anyhow::anyhow!("Sync failed: the chain tip moved during every fetch").into())
+    }
+
+    /// Apply a fetched update and persist it under the write lock, then rebroadcast
+    /// unconfirmed transactions without it, as bark's sync does.
+    ///
+    /// `None` if the tip is no longer `tip`, the one the update was fetched from. Only a sync
+    /// run by bark (its daemon, or a bitcoind handle) can move it, and that chain may be newer.
+    /// Merging this update could undo a reorg, and dropping its checkpoints would leave its
+    /// anchored transactions unconfirmed, so the caller fetches again from the new tip.
+    async fn apply(
+        &self,
+        tip: bdk_wallet::chain::BlockId,
+        mut update: bdk_wallet::Update,
+    ) -> Result<Option<u64>, BarkError> {
+        let (balance, unconfirmed) = {
+            let mut w = self.wallet.write().await;
+            if w.wallet.latest_checkpoint().block_id() != tip {
+                return Ok(None);
+            }
+            // Esplora can lag a just-broadcast tx; bark keeps it for a grace period.
+            let now = now_secs();
+            let recent: HashSet<bitcoin::Txid> = w
+                .wallet
+                .transactions()
+                .filter_map(|tx| match tx.chain_position {
+                    ChainPosition::Unconfirmed {
+                        last_seen: Some(seen),
+                        ..
+                    } if now.saturating_sub(seen) < ONCHAIN_EVICTION_GRACE_SECS => {
+                        Some(tx.tx_node.txid)
+                    }
+                    _ => None,
+                })
+                .collect();
+            update
+                .tx_update
+                .evicted_ats
+                .retain(|(txid, _)| !recent.contains(txid));
+            w.wallet.apply_update(update).context("Sync failed")?;
+            if let Some(stage) = w.wallet.staged() {
+                w.db.store_bdk_wallet_changeset(stage).await?;
+                w.wallet.take_staged();
+            }
+            let now = now_secs();
+            let unconfirmed: Vec<_> = w
+                .wallet
+                .transactions()
+                .filter(|tx| {
+                    matches!(tx.chain_position, ChainPosition::Unconfirmed { last_seen, .. }
+                        if last_seen.is_none_or(|seen| seen < now))
+                })
+                .map(|tx| tx.tx_node.tx)
+                .collect();
+            (w.wallet.balance().total().to_sat(), unconfirmed)
+        };
+        for tx in unconfirmed {
+            if let Err(error) = self.chain.broadcast_tx(&tx).await {
+                warn!("Error broadcasting tx {}: {error:#}", tx.compute_txid());
+            }
+        }
+        Ok(Some(balance))
     }
 
     /// Discover the wallet's pre-existing on-chain history.
@@ -290,16 +420,40 @@ impl OnchainWallet {
     /// or a block scan from `birthday_height` on bitcoind. Run it once after
     /// restoring; returns the total balance in sats afterwards.
     pub async fn initial_scan(&self, birthday_height: Option<u32>) -> Result<u64, BarkError> {
-        let mut w = self.wallet.write().await;
-        let balance = w
-            .initial_wallet_scan(&self.chain, birthday_height.map(Into::into))
-            .await
-            .context("Initial wallet scan failed")?;
-        Ok(balance.to_sat())
+        let Some(esplora) = &self.esplora else {
+            let mut w = self.wallet.write().await;
+            let balance = w
+                .initial_wallet_scan(&self.chain, birthday_height.map(Into::into))
+                .await
+                .context("Initial wallet scan failed")?;
+            return Ok(balance.to_sat());
+        };
+        let gate = self.wallet.read().await.sync_gate.clone();
+        let _sync = gate.lock().await;
+        for _ in 0..FETCH_ATTEMPTS {
+            let (tip, request) = {
+                let w = self.wallet.read().await;
+                (
+                    w.wallet.latest_checkpoint().block_id(),
+                    w.wallet.start_full_scan_at(now_secs()),
+                )
+            };
+            let update = esplora
+                .full_scan(request, STOP_GAP, PARALLEL_REQS)
+                .await
+                .context("Initial wallet scan failed")?;
+            if let Some(balance) = self.apply(tip, update.into()).await? {
+                return Ok(balance);
+            }
+        }
+        Err(
+            anyhow::anyhow!("Initial wallet scan failed: the chain tip moved during every fetch")
+                .into(),
+        )
     }
 
     pub async fn balance(&self) -> Result<OnchainBalance, BarkError> {
-        let w = self.wallet.write().await;
+        let w = self.wallet.read().await;
         Ok(w.wallet.balance().into())
     }
 
@@ -408,5 +562,257 @@ impl OnchainWallet {
 
     pub(crate) fn inner(&self) -> Arc<RwLock<dyn OnchainWalletTrait>> {
         self.wallet.clone()
+    }
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+    use bitcoin::hashes::{sha256, Hash};
+    use std::io::{Read, Write};
+    use std::sync::atomic::{AtomicBool, Ordering};
+    use std::sync::Mutex;
+
+    /// An Esplora stub that holds the first `/blocks`, a fetch's first request, until released.
+    struct StubEsplora {
+        url: String,
+        /// Bodies of `/scripthash/{hash}/txs` by path; other scripts have no history.
+        txs: Arc<Mutex<HashMap<String, String>>>,
+        entered: tokio::sync::mpsc::UnboundedReceiver<()>,
+        release: std::sync::mpsc::Sender<()>,
+    }
+
+    /// `blocks` (height, hash) are served by `/blocks` along with genesis.
+    fn stub_esplora(blocks: Vec<(u32, bitcoin::BlockHash)>) -> StubEsplora {
+        let listener = std::net::TcpListener::bind("127.0.0.1:0").unwrap();
+        let url = format!("http://{}", listener.local_addr().unwrap());
+        let txs = Arc::new(Mutex::new(HashMap::new()));
+        let (entered_tx, entered) = tokio::sync::mpsc::unbounded_channel();
+        let (release, release_rx) = std::sync::mpsc::channel::<()>();
+        let release_rx = Arc::new(Mutex::new(release_rx));
+        let stalled = Arc::new(AtomicBool::new(false));
+        let served = txs.clone();
+        std::thread::spawn(move || {
+            for stream in listener.incoming() {
+                let (mut stream, txs, entered_tx, release_rx, stalled, blocks) = (
+                    stream.unwrap(),
+                    served.clone(),
+                    entered_tx.clone(),
+                    release_rx.clone(),
+                    stalled.clone(),
+                    blocks.clone(),
+                );
+                std::thread::spawn(move || {
+                    let mut request = Vec::new();
+                    let mut buffer = [0; 1024];
+                    while !request.windows(4).any(|w| w == b"\r\n\r\n") {
+                        let read = stream.read(&mut buffer).unwrap();
+                        if read == 0 {
+                            return;
+                        }
+                        request.extend_from_slice(&buffer[..read]);
+                    }
+                    let request = String::from_utf8_lossy(&request);
+                    let path = request.split_whitespace().nth(1).unwrap_or_default();
+                    let genesis =
+                        bitcoin::constants::genesis_block(bitcoin::Network::Regtest).block_hash();
+                    let (status, body) = if path == "/block-height/0" {
+                        ("200 OK", genesis.to_string())
+                    } else if path == "/blocks" {
+                        if !stalled.swap(true, Ordering::SeqCst) {
+                            entered_tx.send(()).unwrap();
+                            let _ = release_rx.lock().unwrap().recv();
+                        }
+                        let info = |&(height, hash): &(u32, bitcoin::BlockHash)| {
+                            serde_json::json!({
+                                "id": hash, "height": height, "version": 1, "timestamp": 1,
+                                "tx_count": 1, "size": 1, "weight": 4,
+                                "merkle_root": "00".repeat(32), "previousblockhash": null,
+                                "mediantime": 1, "nonce": 0, "bits": 0, "difficulty": 1.0,
+                            })
+                        };
+                        let all: Vec<_> = blocks.iter().copied().chain([(0, genesis)]).collect();
+                        (
+                            "200 OK",
+                            serde_json::Value::from_iter(all.iter().map(info)).to_string(),
+                        )
+                    } else if path.starts_with("/scripthash/") && path.ends_with("/txs") {
+                        let body = txs.lock().unwrap().get(path).cloned();
+                        ("200 OK", body.unwrap_or_else(|| "[]".into()))
+                    } else {
+                        ("404 Not Found", String::new())
+                    };
+                    let _ = write!(
+                        stream,
+                        "HTTP/1.1 {status}\r\nContent-Length: {}\r\nConnection: close\r\n\r\n{body}",
+                        body.len()
+                    );
+                });
+            }
+        });
+        StubEsplora {
+            url,
+            txs,
+            entered,
+            release,
+        }
+    }
+
+    /// Serve a 50,000 sat payment to `script`, confirmed at height 1 in `block`.
+    fn serve_payment(
+        esplora: &StubEsplora,
+        script: &bitcoin::Script,
+        block: bitcoin::BlockHash,
+    ) -> bitcoin::Txid {
+        let payment = bitcoin::Transaction {
+            version: bitcoin::transaction::Version::TWO,
+            lock_time: bitcoin::absolute::LockTime::ZERO,
+            input: vec![bitcoin::TxIn {
+                previous_output: bitcoin::OutPoint {
+                    txid: bitcoin::Txid::from_byte_array([9; 32]),
+                    vout: 0,
+                },
+                ..Default::default()
+            }],
+            output: vec![bitcoin::TxOut {
+                value: bitcoin::Amount::from_sat(50_000),
+                script_pubkey: script.to_owned(),
+            }],
+        };
+        let txid = payment.compute_txid();
+        let body = serde_json::json!([{
+            "txid": txid, "version": 2, "locktime": 0,
+            "vin": [{
+                "txid": payment.input[0].previous_output.txid, "vout": 0, "prevout": null,
+                "scriptsig": "", "witness": [], "sequence": u32::MAX, "is_coinbase": false,
+            }],
+            "vout": [{ "value": 50_000, "scriptpubkey": script }],
+            "size": payment.total_size(), "weight": payment.weight().to_wu(),
+            "status": {
+                "confirmed": true, "block_height": 1, "block_hash": block, "block_time": 1,
+            },
+            "fee": 0,
+        }]);
+        // esplora-client's scripthash path.
+        let path = format!(
+            "/scripthash/{:x}/txs",
+            sha256::Hash::hash(script.as_bytes())
+        );
+        esplora.txs.lock().unwrap().insert(path, body.to_string());
+        txid
+    }
+
+    async fn open_wallet(
+        esplora: &StubEsplora,
+    ) -> (
+        Arc<OnchainWallet>,
+        Arc<dyn BarkPersister>,
+        tempfile::TempDir,
+    ) {
+        let directory = tempfile::tempdir().unwrap();
+        let db = crate::ffi::db::open_sqlite_db(directory.path().to_str().unwrap()).unwrap();
+        let registration =
+            crate::backup::register_live_database(&directory.path().join("db.sqlite")).unwrap();
+        let config: Config = serde_json::from_value(serde_json::json!({
+            "server_address": "http://127.0.0.1:1", "esplora_address": esplora.url,
+        }))
+        .unwrap();
+        let mnemonic = crate::generate_mnemonic().unwrap();
+        let onchain =
+            OnchainWallet::default(Network::Regtest, mnemonic, config, db.clone(), registration)
+                .await
+                .unwrap();
+        (Arc::new(onchain), db, directory)
+    }
+
+    #[test]
+    fn reads_do_not_wait_for_a_sync_fetch() {
+        crate::ffi::runtime::TOKIO_RT.block_on(async {
+            let block = bitcoin::BlockHash::from_byte_array([1; 32]);
+            let mut esplora = stub_esplora(vec![(1, block)]);
+            let (onchain, db, _directory) = open_wallet(&esplora).await;
+            let address = onchain.new_address().await.unwrap();
+            let script = parse_address(&address, bitcoin::Network::Regtest)
+                .unwrap()
+                .script_pubkey();
+            let txid = serve_payment(&esplora, &script, block);
+
+            let syncing = tokio::spawn({
+                let onchain = onchain.clone();
+                async move { onchain.sync().await }
+            });
+            esplora.entered.recv().await.unwrap();
+            let (balance, transactions, utxos) =
+                tokio::time::timeout(std::time::Duration::from_secs(2), async {
+                    (
+                        onchain.balance().await.unwrap(),
+                        onchain.transactions().await.unwrap(),
+                        onchain.utxos().await.unwrap(),
+                    )
+                })
+                .await
+                .expect("a read waited for the sync's network fetch");
+            assert_eq!(balance.total_sats, 0);
+            assert!(transactions.is_empty() && utxos.is_empty());
+
+            esplora.release.send(()).unwrap();
+            assert_eq!(syncing.await.unwrap().unwrap(), 50_000);
+            assert_eq!(onchain.balance().await.unwrap().confirmed_sats, 50_000);
+            let transactions = onchain.transactions().await.unwrap();
+            assert_eq!(transactions.len(), 1);
+            assert_eq!(transactions[0].txid, txid.to_string());
+            let persisted = bark::onchain::bdk_wallet::Wallet::load()
+                .load_wallet_no_persist(db.initialize_bdk_wallet().await.unwrap())
+                .unwrap()
+                .unwrap();
+            assert_eq!(persisted.balance().confirmed.to_sat(), 50_000);
+        });
+    }
+
+    /// A restore scan finds an old payment at an address no sync has revealed, while a sync
+    /// run by bark (its daemon) moves the tip. The payment must still read as confirmed.
+    #[test]
+    fn scan_overlapped_by_a_bark_sync_keeps_old_payments_confirmed() {
+        crate::ffi::runtime::TOKIO_RT.block_on(async {
+            let (old, new) = (
+                bitcoin::BlockHash::from_byte_array([1; 32]),
+                bitcoin::BlockHash::from_byte_array([2; 32]),
+            );
+            let mut esplora = stub_esplora(vec![(2, new), (1, old)]);
+            let (onchain, _db, _directory) = open_wallet(&esplora).await;
+            let script = {
+                let w = onchain.wallet.read().await;
+                let address = w.wallet.peek_address(bdk_wallet::KeychainKind::External, 3);
+                address.script_pubkey()
+            };
+            serve_payment(&esplora, &script, old);
+
+            let scanning = tokio::spawn({
+                let onchain = onchain.clone();
+                async move { onchain.initial_scan(None).await }
+            });
+            esplora.entered.recv().await.unwrap();
+            // What bark's sync would apply: the new tip, nothing for the unrevealed address.
+            {
+                let mut w = onchain.wallet.write().await;
+                let tip = w
+                    .wallet
+                    .latest_checkpoint()
+                    .insert(bdk_wallet::chain::BlockId {
+                        height: 2,
+                        hash: new,
+                    });
+                w.wallet
+                    .apply_update(bdk_wallet::Update {
+                        chain: Some(tip),
+                        ..Default::default()
+                    })
+                    .unwrap();
+            }
+            esplora.release.send(()).unwrap();
+            assert_eq!(scanning.await.unwrap().unwrap(), 50_000);
+            let balance = onchain.balance().await.unwrap();
+            assert_eq!((balance.confirmed_sats, balance.pending_sats), (50_000, 0));
+        });
     }
 }

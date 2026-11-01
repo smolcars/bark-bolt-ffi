@@ -6,6 +6,18 @@ Names use the Rust spelling: Swift lowercases the first letter
 SCREAMING_SNAKE enum constants (`BarkErrorCode.EXIT_NON_STANDARD_VTXO`) and
 class names for variants (`BroadcastOutcome.Uncertain`).
 
+## Unreleased
+
+### Onchain reads no longer wait for a sync
+
+On Esplora, `OnchainWallet.sync` and `initialScan` now fetch without holding
+the wallet lock and take it only to apply and save the result. `balance`,
+`transactions`, `utxos` and other calls no longer wait seconds for a sync's
+network round trip. Syncs and scans still run one at a time, and the result
+matches what Bark's own sync produces. `balance` now takes the read lock.
+Bitcoind syncs still hold the lock, as does Bark's daemon (`runDaemon`)
+onchain sync.
+
 ## 0.7.2
 
 Bark stays at lib-0.8.0 (`959a489f`). No API change; databases open unchanged.

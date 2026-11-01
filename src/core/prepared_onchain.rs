@@ -117,6 +117,8 @@ pub(crate) struct WalletState {
     pub db: std::sync::Arc<dyn bark::persist::BarkPersister>,
     pub board_databases: Vec<std::sync::Weak<dyn bark::persist::BarkPersister>>,
     pub operation_gate: std::sync::Arc<tokio::sync::Mutex<()>>,
+    /// Serialises Esplora syncs and scans, which fetch without holding the wallet lock.
+    pub sync_gate: std::sync::Arc<tokio::sync::Mutex<()>>,
     pub _registration: std::sync::Arc<std::path::PathBuf>,
 }
 
@@ -538,6 +540,7 @@ mod tests {
             db,
             board_databases: Vec::new(),
             operation_gate: Arc::new(tokio::sync::Mutex::new(())),
+            sync_gate: Arc::new(tokio::sync::Mutex::new(())),
             _registration: registration,
         };
         let destination = "bcrt1qw508d6qejxtdg4y5r3zarvary0c5xw7kygt080"
