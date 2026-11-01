@@ -79,6 +79,20 @@ different claims. Record them separately; do not mark one from evidence of anoth
 
 ## Tasks
 
+### 28 — Onchain reads no longer wait for a sync (v0.7.3)
+
+Plan: in `src/core/onchain.rs`, Esplora `sync` and `initialScan` build the
+request under the read lock, fetch with no lock held and take the write lock only
+to apply and save the update. A `sync_gate` in the shared wallet state runs syncs
+and scans one at a time, and an update fetched while the tip moved is dropped and
+fetched again. `balance` takes the read lock. No API change, so a patch release.
+
+- [x] `balance`, `transactions` and `utxos` don't wait for a sync's network fetch.
+- [x] Unit tests for reads during a fetch and a scan overlapped by a Bark sync.
+- [ ] Main CI full matrix.
+- [ ] Stage CI artifacts and move install docs to 0.7.3.
+- [ ] Publish v0.7.3.
+
 ### 27 — Quieter transport logs (v0.7.2)
 
 Plan: in `src/ffi/logger.rs`, the `log` bridge forwards only Info and above from
