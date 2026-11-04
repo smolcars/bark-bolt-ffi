@@ -527,7 +527,7 @@ wallet.stopMailboxProcessor()    // background; returns once stopped
 wallet.close()                   // also stops it, without waiting
 ```
 
-`stopMailboxProcessor()` waits for a message being processed. While the
-subscription is still connecting to an unresponsive server it can wait for the
-connection attempt to fail; cancel the await if that is too long, and the
-processor still stops on its own. The processor does not replace `sync()`.
+`stopMailboxProcessor()` returns within about 5 seconds: a message being
+processed gets that long to finish, and a subscription still connecting or busy
+after it is dropped; the server delivers that message again later. The
+processor does not replace `sync()`.

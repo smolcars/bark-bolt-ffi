@@ -7,10 +7,12 @@
 //! serializes the arkoor dedup and only moves the checkpoint forward, so the
 //! processor can run next to `sync()` and payment calls.
 
-use std::sync::{Arc, Mutex};
+use std::future::Future;
+use std::sync::Arc;
 use std::time::{Duration, Instant};
 
 use log::{info, warn};
+use tokio::sync::Mutex;
 use tokio::task::JoinHandle;
 use tokio_util::sync::CancellationToken;
 
@@ -22,6 +24,11 @@ const RESTART_DELAY: Duration = Duration::from_secs(1);
 /// Longest wait between resubscribes while the server stays unreachable. A
 /// subscription that lasted at least this long starts over at `RESTART_DELAY`.
 const MAX_RESTART_DELAY: Duration = Duration::from_secs(30);
+/// How long a cancelled subscription may take to return. Bark checks for
+/// cancellation between messages, so a message in flight finishes; it doesn't
+/// while connecting. After this the subscription is dropped, as if the app had
+/// been killed, and Bark resumes from the unadvanced checkpoint next time.
+const STOP_GRACE: Duration = Duration::from_secs(5);
 
 struct Task {
     shutdown: CancellationToken,
@@ -38,10 +45,15 @@ struct State {
     spawned: usize,
 }
 
-/// Owns the processor task of one native wallet. The lock is never held
-/// across an await.
+/// Owns the processor task of one native wallet.
+///
+/// Every lifecycle change, daemon start and stop included, holds `state` until
+/// it has finished. A start therefore never overlaps a stop that is still
+/// waiting for its task, and `daemon` always matches Bark's daemon.
 pub(crate) struct MailboxProcessor {
     state: Mutex<State>,
+    /// Cancelled when the wallet is dropped; each task's token is a child.
+    closed: CancellationToken,
 }
 
 impl MailboxProcessor {
@@ -51,12 +63,30 @@ impl MailboxProcessor {
                 daemon,
                 ..State::default()
             }),
+            closed: CancellationToken::new(),
         }
     }
 
     /// Start the processor unless it already runs or the daemon does.
-    pub(crate) fn start(&self, core: &Arc<CoreWallet>) {
-        let mut state = self.state.lock().unwrap();
+    pub(crate) async fn start(&self, core: &Arc<CoreWallet>) {
+        let core = core.clone();
+        self.start_with(move |shutdown| {
+            let core = core.clone();
+            async move {
+                core.inner()
+                    .subscribe_process_mailbox_messages(None, shutdown)
+                    .await
+            }
+        })
+        .await
+    }
+
+    async fn start_with<F, Fut>(&self, subscribe: F)
+    where
+        F: FnMut(CancellationToken) -> Fut + Send + 'static,
+        Fut: Future<Output = anyhow::Result<()>> + Send + 'static,
+    {
+        let mut state = self.state.lock().await;
         if state.daemon {
             info!("[MAILBOX] Daemon already processes the mailbox; processor not started");
             return;
@@ -64,8 +94,8 @@ impl MailboxProcessor {
         if state.task.as_ref().is_some_and(|t| !t.handle.is_finished()) {
             return;
         }
-        let shutdown = CancellationToken::new();
-        let handle = TOKIO_RT.spawn(run(core.clone(), shutdown.clone()));
+        let shutdown = self.closed.child_token();
+        let handle = TOKIO_RT.spawn(run(subscribe, shutdown.clone()));
         state.task = Some(Task { shutdown, handle });
         #[cfg(test)]
         {
@@ -73,57 +103,75 @@ impl MailboxProcessor {
         }
     }
 
-    /// Stop the processor and wait until its task has ended. A message being
-    /// processed finishes first. No-op when the processor is not running.
+    /// Stop the processor and wait until its task has ended. No-op when the
+    /// processor is not running.
     pub(crate) async fn stop(&self) {
-        let task = self.state.lock().unwrap().task.take();
-        if let Some(task) = task {
-            task.shutdown.cancel();
-            if let Err(error) = task.handle.await {
-                warn!("[MAILBOX] Processor task failed: {error}");
-            }
-        }
+        stop_task(&mut *self.state.lock().await).await;
     }
 
-    /// Hand the mailbox to Bark's daemon: stop the processor and keep it off
-    /// until [`Self::daemon_stopped`].
-    pub(crate) async fn hand_to_daemon(&self) {
-        let task = {
-            let mut state = self.state.lock().unwrap();
-            state.daemon = true;
-            state.task.take()
-        };
-        if let Some(task) = task {
+    /// Stop the processor, then start Bark's daemon with `start_daemon`. The
+    /// processor stays off until [`Self::stop_daemon`].
+    pub(crate) async fn hand_to_daemon(
+        &self,
+        start_daemon: impl FnOnce() -> anyhow::Result<()>,
+    ) -> anyhow::Result<()> {
+        let mut state = self.state.lock().await;
+        if state.task.is_some() {
             info!("[MAILBOX] Stopping processor; the daemon takes over the mailbox");
-            task.shutdown.cancel();
-            let _ = task.handle.await;
         }
+        stop_task(&mut state).await;
+        start_daemon()?;
+        state.daemon = true;
+        Ok(())
     }
 
-    pub(crate) fn daemon_stopped(&self) {
-        self.state.lock().unwrap().daemon = false;
+    /// Stop Bark's daemon with `stop_daemon`; the processor may start again.
+    pub(crate) async fn stop_daemon<T>(&self, stop_daemon: impl Future<Output = T>) -> T {
+        let mut state = self.state.lock().await;
+        let stopped = stop_daemon.await;
+        // Bark drops its daemon handle even when waiting for it fails.
+        state.daemon = false;
+        stopped
     }
 
-    /// Signal the task to stop without waiting, for the wallet's `Drop`. The
-    /// task releases its wallet reference once a message in flight finishes.
-    pub(crate) fn cancel(&self) {
-        if let Some(task) = &self.state.lock().unwrap().task {
-            task.shutdown.cancel();
+    /// Stop the processor without waiting, for the wallet's `Drop`. Its task
+    /// releases the wallet within `STOP_GRACE`.
+    pub(crate) fn close(&self) {
+        self.closed.cancel();
+    }
+}
+
+async fn stop_task(state: &mut State) {
+    if let Some(task) = state.task.take() {
+        task.shutdown.cancel();
+        if let Err(error) = task.handle.await {
+            warn!("[MAILBOX] Processor task failed: {error}");
         }
     }
 }
 
-async fn run(core: Arc<CoreWallet>, shutdown: CancellationToken) {
+/// Resubscribe until cancelled. `subscribe` owns the wallet reference, so it
+/// is released when this returns.
+async fn run<F, Fut>(mut subscribe: F, shutdown: CancellationToken)
+where
+    F: FnMut(CancellationToken) -> Fut,
+    Fut: Future<Output = anyhow::Result<()>>,
+{
     info!("[MAILBOX] Processor started");
     let mut delay = RESTART_DELAY;
     loop {
         let started = Instant::now();
         // Boxed: Bark's subscription future is large.
-        let result = Box::pin(
-            core.inner()
-                .subscribe_process_mailbox_messages(None, shutdown.clone()),
-        )
-        .await;
+        let mut subscription = Box::pin(subscribe(shutdown.clone()));
+        let result = tokio::select! {
+            result = &mut subscription => result,
+            _ = shutdown.cancelled() => {
+                if tokio::time::timeout(STOP_GRACE, subscription).await.is_err() {
+                    warn!("[MAILBOX] Subscription still busy after {STOP_GRACE:?}; dropping it");
+                }
+                break;
+            }
+        };
         if shutdown.is_cancelled() {
             break;
         }
@@ -145,19 +193,160 @@ async fn run(core: Arc<CoreWallet>, shutdown: CancellationToken) {
 
 #[cfg(test)]
 mod tests {
-    use std::sync::Weak;
-    use std::time::Duration;
+    use std::sync::atomic::{AtomicBool, Ordering::SeqCst};
+    use std::sync::{Arc, Weak};
+    use std::time::{Duration, Instant};
 
+    use tokio_util::sync::CancellationToken;
+
+    use super::{MailboxProcessor, STOP_GRACE};
+    use crate::ffi::runtime::TOKIO_RT;
     use crate::ffi::wallet::{Wallet, WalletOpenArgs};
     use crate::types::{Network, WalletNotification};
     use crate::Config;
 
+    /// A stopping task still owns the lifecycle: a concurrent stop returns
+    /// only once it has ended, and a concurrent start can't run next to it.
+    #[test]
+    fn stop_holds_the_lifecycle_until_the_task_ends() {
+        TOKIO_RT.block_on(async {
+            let processor = MailboxProcessor::new(false);
+            let ended = Arc::new(AtomicBool::new(false));
+            let flag = ended.clone();
+            // Takes 300 ms to return once cancelled, like a message in flight.
+            processor
+                .start_with(move |shutdown: CancellationToken| {
+                    let flag = flag.clone();
+                    async move {
+                        shutdown.cancelled().await;
+                        tokio::time::sleep(Duration::from_millis(300)).await;
+                        flag.store(true, SeqCst);
+                        Ok(())
+                    }
+                })
+                .await;
+            let overlapped = Arc::new(AtomicBool::new(false));
+            let later = || tokio::time::sleep(Duration::from_millis(50));
+            let (_, second_stop_saw_end, _) = tokio::join!(
+                processor.stop(),
+                async {
+                    later().await;
+                    processor.stop().await;
+                    ended.load(SeqCst)
+                },
+                async {
+                    later().await;
+                    let (ended, overlapped) = (ended.clone(), overlapped.clone());
+                    processor
+                        .start_with(move |shutdown: CancellationToken| {
+                            overlapped.fetch_or(!ended.load(SeqCst), SeqCst);
+                            async move {
+                                shutdown.cancelled().await;
+                                Ok(())
+                            }
+                        })
+                        .await;
+                },
+            );
+            assert!(second_stop_saw_end, "a concurrent stop returned early");
+            assert_eq!(processor.state.lock().await.spawned, 2);
+            processor.stop().await;
+            assert!(
+                !overlapped.load(SeqCst),
+                "a start ran next to the stopping task"
+            );
+        });
+    }
+
+    /// `run_daemon` and a concurrent `stop_daemon` apply in order, so the
+    /// daemon flag matches the daemon afterwards.
+    #[test]
+    fn daemon_start_and_stop_are_serialized() {
+        TOKIO_RT.block_on(async {
+            let processor = MailboxProcessor::new(false);
+            let ended = Arc::new(AtomicBool::new(false));
+            let flag = ended.clone();
+            processor
+                .start_with(move |shutdown: CancellationToken| {
+                    let flag = flag.clone();
+                    async move {
+                        shutdown.cancelled().await;
+                        tokio::time::sleep(Duration::from_millis(300)).await;
+                        flag.store(true, SeqCst);
+                        Ok(())
+                    }
+                })
+                .await;
+            let daemon = Arc::new(AtomicBool::new(false));
+            let (started, _) = tokio::join!(
+                processor.hand_to_daemon(|| {
+                    assert!(ended.load(SeqCst), "daemon started next to the processor");
+                    daemon.store(true, SeqCst);
+                    Ok(())
+                }),
+                async {
+                    tokio::time::sleep(Duration::from_millis(50)).await;
+                    processor
+                        .stop_daemon(async {
+                            assert!(daemon.load(SeqCst), "daemon stopped before it started");
+                            daemon.store(false, SeqCst);
+                        })
+                        .await
+                },
+            );
+            started.unwrap();
+            assert!(!processor.state.lock().await.daemon);
+            processor
+                .start_with(|shutdown: CancellationToken| async move {
+                    shutdown.cancelled().await;
+                    Ok(())
+                })
+                .await;
+            assert_eq!(processor.state.lock().await.spawned, 2);
+            processor.stop().await;
+        });
+    }
+
+    /// Bark doesn't check its token while connecting: a subscription that
+    /// never returns is abandoned after `STOP_GRACE` on stop and on close,
+    /// releasing what it holds.
+    #[test]
+    fn stop_and_close_abandon_a_stuck_subscription() {
+        TOKIO_RT.block_on(async {
+            let processor = MailboxProcessor::new(false);
+            for close in [false, true] {
+                let probe = Arc::new(());
+                let held = Arc::downgrade(&probe);
+                processor
+                    .start_with(move |_shutdown: CancellationToken| {
+                        let probe = probe.clone();
+                        async move {
+                            let _probe = probe;
+                            std::future::pending::<anyhow::Result<()>>().await
+                        }
+                    })
+                    .await;
+                tokio::time::sleep(Duration::from_millis(100)).await;
+                let stopping = Instant::now();
+                if close {
+                    processor.close();
+                } else {
+                    processor.stop().await;
+                }
+                while held.strong_count() > 0 {
+                    assert!(stopping.elapsed() < STOP_GRACE + Duration::from_secs(2));
+                    tokio::time::sleep(Duration::from_millis(20)).await;
+                }
+            }
+        });
+    }
+
     fn spawned(wallet: &Wallet) -> usize {
-        wallet.mailbox.state.lock().unwrap().spawned
+        wallet.mailbox.state.try_lock().unwrap().spawned
     }
 
     fn running(wallet: &Wallet) -> bool {
-        let state = wallet.mailbox.state.lock().unwrap();
+        let state = wallet.mailbox.state.try_lock().unwrap();
         state.task.as_ref().is_some_and(|t| !t.handle.is_finished())
     }
 

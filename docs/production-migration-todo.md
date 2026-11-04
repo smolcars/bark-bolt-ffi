@@ -87,13 +87,17 @@ on the SDK runtime for wallets opened without the daemon, restarting it after
 `start_mailbox_processor` (idempotent; no-op while the daemon runs) and
 `stop_mailbox_processor` (cancels and waits). `run_daemon` stops a running
 processor before the daemon takes the mailbox; `Drop` cancels without waiting.
-The task holds a strong wallet reference because Bark's weak variant is
-crate-private, so cancellation on drop is what releases it. Bark's handler is
+Start, stop and daemon start/stop hold one async lock through completion. The
+task holds a strong wallet reference because Bark's weak variant is
+crate-private, so cancellation on drop is what releases it; a cancelled
+subscription gets 5 s to return before it is dropped, because Bark doesn't
+check its token while connecting. Bark's handler is
 the one `sync()` uses: arkoor dedup under its processing lock and a monotonic
 checkpoint make it safe next to `sync()`. New API, so a minor release.
 
 - [x] Feasibility: Bark handler, concurrency, BoltFFI shape, teardown, mailbox auth.
 - [x] Offline lifecycle test: start twice, retry while unreachable, stop/restart, daemon hand-over, drop releases the wallet.
+- [x] Concurrent stop/start and daemon start/stop are serialized; a stuck subscription is dropped 5 s after stop or close.
 - [x] Live RegTest Rust test: arkoor receive notified without `sync()`, stopped processor leaves the payment waiting, restart resumes, receives recorded once next to `sync()`.
 - [x] Live Swift and Kotlin contract tests.
 - [ ] PR CI and review.

@@ -47,6 +47,13 @@ Other agents' stacks, simulators and emulators were not touched.
   server): start twice spawns one task; the task survives failed subscriptions;
   stop waits and restart spawns anew; `runDaemon` stops it and blocks starts
   until `stopDaemonWait`; drop releases the wallet.
+- Review fixes, tested with a stand-in subscription (no server):
+  `stop_holds_the_lifecycle_until_the_task_ends` (a concurrent stop returns
+  only after the stopping task ended and a concurrent start doesn't overlap it;
+  it fails with the original take-then-join `stop`),
+  `daemon_start_and_stop_are_serialized` and
+  `stop_and_close_abandon_a_stuck_subscription` (a subscription that never
+  returns is dropped within 5 s of stop or close and releases its references).
 - `BARK_REGTEST=1 cargo test --locked -- --test-threads=1`: 97 unit, 1
   exit-estimate, 1 payments and 6 of 7 prepared-board tests passed;
   `live_prepared_board_never_spends_excluded_outpoints` failed its
@@ -70,7 +77,8 @@ Other agents' stacks, simulators and emulators were not touched.
 ## Limits
 
 The example apps were not changed or rerun. Noah does not call the processor
-yet. `stopMailboxProcessor()` waits for a message in flight and, while the
-subscription is still connecting to an unresponsive server, for that attempt to
-fail; Bark doesn't check the token during connect. Physical devices were not
-run. Hosted CI, review and publication are recorded separately.
+yet. Bark doesn't check the token while it connects, so a subscription still
+connecting or busy 5 s after a stop or close is dropped rather than awaited;
+that is covered with a stuck stand-in subscription, not a stalled live server.
+Physical devices were not run. Hosted CI, review and publication are recorded
+separately.

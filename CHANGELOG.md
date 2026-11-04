@@ -33,9 +33,12 @@ the sender's `sendArkoorPayment` returns.
   Bark's daemon runs (`runDaemon: true` or `runDaemon()`) it does nothing either,
   because the daemon processes the mailbox itself; `runDaemon()` stops a
   running processor first.
-- `stopMailboxProcessor()` returns once it has stopped; a message being
-  processed finishes first. Closing or dropping the wallet stops it without
-  waiting.
+- `stopMailboxProcessor()` returns once it has stopped, within about 5 s: a
+  message being processed gets that long to finish. Bark can't be interrupted
+  while it connects, so a subscription still connecting or busy after 5 s is
+  dropped, and the server delivers the message again later. Closing or
+  dropping the wallet stops it the same way without waiting. Start, stop and
+  the daemon calls run one at a time, so a start never overlaps a stop.
 - Keep calling `sync()`: it still does everything else (fees, pending rounds,
   boards, offboards, Lightning sends and exits).
 

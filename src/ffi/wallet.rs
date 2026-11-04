@@ -1321,17 +1321,22 @@ impl Wallet {
         let inner = self.core.inner().clone();
         let mailbox = self.mailbox.clone();
         run_async(async move {
-            mailbox.hand_to_daemon().await;
-            inner.start_daemon().map_err(BarkError::from)
+            mailbox
+                .hand_to_daemon(|| inner.start_daemon())
+                .await
+                .map_err(BarkError::from)
         })
-        .await?;
-        Ok(())
+        .await
     }
 
     pub async fn stop_daemon(&self) -> Result<(), BarkError> {
-        self.core.inner().stop_daemon();
-        self.mailbox.daemon_stopped();
-        Ok(())
+        let inner = self.core.inner().clone();
+        let mailbox = self.mailbox.clone();
+        run_async(async move {
+            mailbox.stop_daemon(async { inner.stop_daemon() }).await;
+            Ok(())
+        })
+        .await
     }
 
     /// Stop the background daemon and wait until its tasks have finished, so
@@ -1339,13 +1344,8 @@ impl Wallet {
     /// wallet's datadir). No-op when no daemon is running.
     pub async fn stop_daemon_wait(&self) -> Result<(), BarkError> {
         let mailbox = self.mailbox.clone();
-        self.run(|core| async move {
-            let stopped = core.stop_daemon_wait().await;
-            // Bark drops its daemon handle even when the wait fails.
-            mailbox.daemon_stopped();
-            stopped
-        })
-        .await
+        self.run(|core| async move { mailbox.stop_daemon(core.stop_daemon_wait()).await })
+            .await
     }
 
     // ------------------------------------------------------------------------
@@ -1369,12 +1369,19 @@ impl Wallet {
     /// daemon runs, because the daemon already processes the mailbox. Keep
     /// calling `sync()` for everything else it does.
     pub async fn start_mailbox_processor(&self) -> Result<(), BarkError> {
-        self.mailbox.start(&self.core);
-        Ok(())
+        let mailbox = self.mailbox.clone();
+        let core = self.core.clone();
+        run_async(async move {
+            mailbox.start(&core).await;
+            Ok(())
+        })
+        .await
     }
 
-    /// Stop the mailbox processor and wait until it has stopped. A message
-    /// being processed finishes first. No-op when it is not running.
+    /// Stop the mailbox processor and wait until it has stopped, at most about
+    /// 5 seconds. A message being processed gets that long to finish; after
+    /// it, or while the subscription is still connecting, it is abandoned and
+    /// the server delivers it again next time. No-op when it is not running.
     pub async fn stop_mailbox_processor(&self) -> Result<(), BarkError> {
         let mailbox = self.mailbox.clone();
         run_async(async move {
@@ -1387,7 +1394,7 @@ impl Wallet {
 
 impl Drop for Wallet {
     fn drop(&mut self) {
-        self.mailbox.cancel();
+        self.mailbox.close();
         self.core.inner().stop_daemon();
     }
 }
