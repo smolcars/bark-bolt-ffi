@@ -47,18 +47,23 @@ until Bark's daemon has ended.
 
 ## Results (local, 2026-11-04, macOS ARM64)
 
+Final code is `caeb918`; earlier numbers from the first design are kept where
+noted.
+
 - No-sync arrival, measured from `sendArkoorPayment` returning to the
   `bark.arkoor` receive on the recipient's `notifications()` (recipient opened
   with `run_daemon: false`, never synced first):
-  - Rust `live_arkoor_receive_without_sync`: 13, 27, 32 and 27 ms on four runs
-    (108-116 ms from the start of the send). A payment sent while the processor
-    was stopped stayed in the mailbox for 3 s, and a restart picked it up in
-    54-74 ms. Two payments sent while `sync()` ran concurrently were recorded
-    once each (4 receive movements, 24,000 sats). Dropping the wallet while the
-    processor ran released every reference within the 10 s limit.
-  - Swift `testLiveMailboxProcessorReceivesWithoutSync`: 32 ms.
-  - Kotlin `MailboxProcessorContractTest`: 36 ms (`:sdk:jvm:test`) and 28 ms
-    (`testPackaged`).
+  - Rust `live_arkoor_receive_without_sync` on `caeb918`: 30, 33, 29 ms on three
+    runs (117-119 ms from the start of the send). A payment sent while the
+    processor was stopped stayed in the mailbox for 3 s, and a restart picked
+    it up in 61-74 ms. Two payments sent while `sync()` ran concurrently were
+    recorded once each (4 receive movements, 24,000 sats). Dropping the wallet
+    while the processor ran released every reference. The first design measured
+    13-32 ms.
+  - Swift `testLiveMailboxProcessorReceivesWithoutSync` on `caeb918`: 31 ms
+    (32 ms on the first design).
+  - Kotlin `MailboxProcessorContractTest` on `caeb918`: 30 ms
+    (`testPackaged`; 36 and 28 ms on the first design).
 - `lifecycle_without_server` (no RegTest, local Esplora stub, unreachable Ark
   server): start twice spawns one task; the task survives failed subscriptions;
   stop waits and restart spawns anew; `runDaemon` stops it and blocks starts
@@ -73,18 +78,20 @@ until Bark's daemon has ended.
   `stop_and_close_interrupt_a_stalled_subscription` (against a server that
   accepts the connection and never answers, stop returns in under 1 s and
   dropping the wallet releases it in under 1 s).
-- `BARK_REGTEST=1 cargo test --locked -- --test-threads=1`: 97 unit, 1
-  exit-estimate, 1 payments and 6 of 7 prepared-board tests passed;
+- `BARK_REGTEST=1 cargo test --locked -- --test-threads=1` on `caeb918`: 100
+  unit, 1 exit-estimate, 1 payments and 6 of 7 prepared-board tests passed;
   `live_prepared_board_never_spends_excluded_outpoints` failed its
-  largest-first coin-selection assertion (the board picked the 60k coin), the
-  same test that failed once on the v0.7.3 main run. Rerun with the 3
-  prepared-onchain tests: 7 and 3 passed. This change doesn't touch boarding.
+  largest-first coin-selection assertion (the board picked the smaller coin),
+  as it did on the first design's full run and once on the v0.7.3 main run.
+  Rerun with the 3 prepared-onchain tests: 7 and 3 passed. This change doesn't
+  touch boarding or coin selection.
 - `BARK_REGTEST=1 swift test --package-path tests/swift` against a fresh
-  `just build-ios --overlay boltffi.local.toml`: 17 tests, 0 failures.
+  `just build-ios --overlay boltffi.local.toml` of `caeb918`: 17 tests, 0
+  failures (also 17/17 on the first design and on `c69750a`).
 - `BARK_REGTEST=1 ./gradlew :sdk:jvm:test :sdk:jvm:testPackaged
   :sdk:android:assembleRelease :examples:android:assembleDebug` against a fresh
-  `just build-android --overlay boltffi.local.toml`: 16 JVM tests and 16
-  packaged tests, 0 failures, 0 skipped; AAR and example APK built.
+  `just build-android --overlay boltffi.local.toml` of `caeb918`: 16 JVM tests
+  and 16 packaged tests, 0 failures, 0 skipped; AAR and example APK built.
 - `boltffi generate swift --deny-skipped` and `scripts/check-api.py`: 165
   exports, 62 records, 22 enums, 2 callbacks in both hosts. The generated Swift
   and Kotlin carry `startMailboxProcessor()`/`stopMailboxProcessor()` as
@@ -92,6 +99,13 @@ until Bark's daemon has ended.
 - `cargo fmt --check`, `cargo clippy --locked --all-targets -- -D warnings`,
   `tests/python` (10 tests), shellcheck, `tests/shell/ark-dev.sh` and
   `scripts/swift-artifact.py`: pass.
+
+## Review
+
+GPT-6.1 Sol on high reviewed three rounds: round 1 found S1-S3 (concurrent
+stop/start, daemon flag races, connect not cancellable), round 2 found S4
+(forced drop could lose a receive movement) and S2 still open for the
+non-waiting daemon stop, and round 3 approved `caeb918` with all four resolved.
 
 ## Limits
 
