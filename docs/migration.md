@@ -31,7 +31,7 @@ BOLTFFI="$PWD/target/tools/boltffi" scripts/build-sdk.sh android --release
 ./gradlew :sdk:android:publishToMavenLocal :sdk:jvm:publishToMavenLocal
 ```
 
-Use `mavenLocal()` with `io.github.niteshbalusu11:bark-bolt-ffi-android:0.7.3`,
+Use `mavenLocal()` with `io.github.niteshbalusu11:bark-bolt-ffi-android:0.8.0`,
 or the host-specific `bark-bolt-ffi-jvm-darwin-arm64` / `bark-bolt-ffi-jvm-linux-x86_64`
 artifact. Import `io.github.niteshbalusu11.bark.*`. The Maven POM supplies the
 coroutines dependency. The Android AAR embeds all three JNI ABIs and consumer
@@ -498,7 +498,7 @@ New and changed behaviour:
   still confirmed on first submit, and throw `preparedInputsUnavailable` after a
   reorg (or an error when the chain source is unreachable).
 
-## Live mailbox processor (unreleased)
+## Live mailbox processor (v0.8.0)
 
 Without the daemon, incoming arkoor payments used to reach the wallet, and its
 `notifications()` stream, only on the next `sync()`. `startMailboxProcessor()`

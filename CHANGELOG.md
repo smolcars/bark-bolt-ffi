@@ -6,7 +6,7 @@ Names use the Rust spelling: Swift lowercases the first letter
 SCREAMING_SNAKE enum constants (`BarkErrorCode.EXIT_NON_STANDARD_VTXO`) and
 class names for variants (`BroadcastOutcome.Uncertain`).
 
-## Unreleased
+## 0.8.0
 
 Bark stays at lib-0.8.0 (`959a489f`). Adds two `Wallet` methods; existing calls,
 the ABI of existing types and databases are unchanged.

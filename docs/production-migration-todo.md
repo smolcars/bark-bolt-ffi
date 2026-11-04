@@ -79,7 +79,7 @@ different claims. Record them separately; do not mark one from evidence of anoth
 
 ## Tasks
 
-### 29 — Live mailbox processor
+### 29 — Live mailbox processor (v0.8.0)
 
 Plan: `src/ffi/mailbox.rs` runs Bark's `subscribe_process_mailbox_messages`
 on the SDK runtime for wallets opened without the daemon, restarting it after
@@ -95,11 +95,13 @@ checkpoint make it safe next to `sync()`. New API, so a minor release.
 - [x] Feasibility: Bark handler, concurrency, BoltFFI shape, teardown, mailbox auth.
 - [x] Offline lifecycle test: start twice, retry while unreachable, stop/restart, daemon hand-over, drop releases the wallet.
 - [x] Live RegTest Rust test: arkoor receive notified without `sync()`, stopped processor leaves the payment waiting, restart resumes, receives recorded once next to `sync()`.
-- [ ] Live Swift and Kotlin contract tests.
+- [x] Live Swift and Kotlin contract tests.
 - [ ] PR CI and review.
 - [ ] Main CI full matrix.
 - [ ] Stage CI artifacts and move install docs.
-- [ ] Publish.
+- [ ] Publish v0.8.0.
+
+[Execution evidence](validation/mailbox-processor-2026-11-04.md).
 
 ### 28 — Onchain reads no longer wait for a sync (v0.7.3)
 
