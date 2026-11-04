@@ -31,7 +31,7 @@ BOLTFFI="$PWD/target/tools/boltffi" scripts/build-sdk.sh android --release
 ./gradlew :sdk:android:publishToMavenLocal :sdk:jvm:publishToMavenLocal
 ```
 
-Use `mavenLocal()` with `io.github.niteshbalusu11:bark-bolt-ffi-android:0.7.3`,
+Use `mavenLocal()` with `io.github.niteshbalusu11:bark-bolt-ffi-android:0.8.0`,
 or the host-specific `bark-bolt-ffi-jvm-darwin-arm64` / `bark-bolt-ffi-jvm-linux-x86_64`
 artifact. Import `io.github.niteshbalusu11.bark.*`. The Maven POM supplies the
 coroutines dependency. The Android AAR embeds all three JNI ABIs and consumer
@@ -65,6 +65,7 @@ explicitly; local file dependencies do not resolve the attached Maven POM.
 | Recovery outcome | `open` mirrors upstream best-effort recovery. Inspect `recoveryStatus()` and the completed report's `isComplete` before declaring seed recovery successful. |
 | Cancellation | Cancelling a foreign await does not roll back a submitted wallet operation. Tokio work already submitted may finish; sync/reconcile the wallet before retrying a payment. |
 | Daemon | Stop with `stopDaemonWait()` before replacing a wallet. Dropping the last native wallet also stops its daemon. |
+| Mailbox processor | Opt-in for `runDaemon: false` wallets. `stopMailboxProcessor()` waits until it has stopped; closing or dropping the wallet also stops it. It stays off while the daemon runs. |
 
 All128 original callable exports, 40 records, 14 enums and both callback traits
 are tracked in `api-baseline.json` and checked against strict host generation.
@@ -496,3 +497,36 @@ New and changed behaviour:
 - Confirmed-only board and send preparations re-check that their parents are
   still confirmed on first submit, and throw `preparedInputsUnavailable` after a
   reorg (or an error when the chain source is unreachable).
+
+## Live mailbox processor (v0.8.0)
+
+Without the daemon, incoming arkoor payments used to reach the wallet, and its
+`notifications()` stream, only on the next `sync()`. `startMailboxProcessor()`
+keeps a mailbox subscription open on the SDK runtime so they arrive as soon as
+the server delivers them. For each new message it runs Bark's `sync_mailbox`,
+the mailbox step of `sync()`, and it never joins a round. See the
+[changelog](../CHANGELOG.md) for what it processes and how it reconnects.
+
+Swift:
+
+```swift
+let wallet = try await Wallet.open(network: .bitcoin, mnemonicOrSeed: seed, config: config,
+                                   args: WalletOpenArgs(runDaemon: false, datadir: path))
+try await wallet.startMailboxProcessor()   // foreground; a second call does nothing
+// ... wallet.notifications() delivers the bark.arkoor receive movement
+try await wallet.stopMailboxProcessor()    // background; returns once stopped
+```
+
+Kotlin:
+
+```kotlin
+val wallet = Wallet.open(Network.BITCOIN, seed, config, WalletOpenArgs(runDaemon = false, datadir = path))
+wallet.startMailboxProcessor()   // foreground; a second call does nothing
+// ... wallet.notifications() delivers the bark.arkoor receive movement
+wallet.stopMailboxProcessor()    // background; returns once stopped
+wallet.close()                   // also stops it, without waiting
+```
+
+`stopMailboxProcessor()` interrupts connecting and waiting at once and lets a
+mailbox sync in progress finish, so it returns about as fast as a `sync()`
+would reach the server. The processor does not replace `sync()`.

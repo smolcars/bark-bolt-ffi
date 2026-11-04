@@ -1,6 +1,6 @@
 [package]
 name = "bark-bolt-ffi"
-version = "0.7.3"
+version = "0.8.0"
 edition = "2021"
 license = "MIT"
 authors = ["Team Second <hello@second.tech>"]
@@ -47,6 +47,8 @@ chrono = "0.4"
 log = "0.4"
 tokio = { version = "1.35", default-features = false, features = ["sync", "macros", "rt-multi-thread", "time"] }
 futures-util = "0.3"
+# Bark's mailbox subscription takes this token type for shutdown.
+tokio-util = { version = "0.7", default-features = false }
 
 # Native FFI and persistence.
 boltffi = "=0.31.1"

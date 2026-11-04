@@ -489,3 +489,54 @@ class PaymentRequestContractTest {
         } finally { directory.deleteRecursively() }
     }
 }
+
+class MailboxProcessorContractTest {
+    private suspend fun nextArkoorReceive(holder: NotificationHolder, millis: Long): Movement? = withTimeoutOrNull(millis) {
+        var received: Movement? = null
+        while (received == null) {
+            val notification = holder.nextNotification()
+            if (notification is WalletNotification.MovementCreated && notification.movement.subsystemName == "bark.arkoor" &&
+                notification.movement.subsystemKind == "receive") received = notification.movement
+        }
+        received
+    }
+
+    @org.junit.Test(timeout=180000) fun liveArkoorReceiveWithoutSync() = runBlocking<Unit> {
+        org.junit.Assume.assumeTrue(System.getenv("BARK_REGTEST") == "1")
+        val directory = java.nio.file.Files.createTempDirectory("bark-mailbox").toFile()
+        val config = Config(serverAddress="http://127.0.0.1:${System.getenv("ARK_PORT") ?: "3635"}",bitcoindAddress="http://127.0.0.1:${System.getenv("BITCOIN_PORT") ?: "19443"}",bitcoindUser="second",bitcoindPass="ark")
+        val mnemonic = generateMnemonic()
+        val recipientSeed = generateMnemonic()
+        val recipientArgs = WalletOpenArgs(runDaemon=false,datadir=java.io.File(directory,"recipient").path,skipRecovery=true)
+        try {
+            OnchainWallet.default(Network.REGTEST,mnemonic,config,directory.path).use { onchain ->
+                Wallet.openWithOnchain(Network.REGTEST,mnemonic,config,WalletOpenArgs(runDaemon=false,datadir=directory.path,skipRecovery=true),onchain).use { wallet ->
+                    regtestCommand("send-to",onchain.newAddress(),"0.005"); onchain.sync()
+                    wallet.boardAmount(100000uL)
+                    regtestCommand("generate","6"); wallet.sync()
+                    // The recipient never calls sync().
+                    Wallet.open(Network.REGTEST,recipientSeed,config,recipientArgs).use { recipient ->
+                        recipient.notifications().use { holder ->
+                            recipient.startMailboxProcessor(); recipient.startMailboxProcessor()
+                            val address = recipient.newAddress()
+                            wallet.sendArkoorPayment(address,10000uL)
+                            val sent = System.nanoTime()
+                            val received = assertNotNull(nextArkoorReceive(holder,5000),"no arkoor receive within 5s without sync")
+                            println("mailbox processor (Kotlin): receive notified ${(System.nanoTime()-sent)/1_000_000}ms after the send returned")
+                            assertEquals(10000L,received.effectiveBalanceSats)
+                            assertEquals(10000uL,recipient.balance().spendableSats)
+                            recipient.stopMailboxProcessor(); recipient.stopMailboxProcessor()
+                            wallet.sendArkoorPayment(address,7000uL)
+                            assertNull(nextArkoorReceive(holder,3000),"a stopped processor still received")
+                            recipient.startMailboxProcessor()
+                            assertEquals(7000L,assertNotNull(nextArkoorReceive(holder,5000),"restart did not pick up the waiting payment").effectiveBalanceSats)
+                        }
+                    } // Closed while the processor runs.
+                    withTimeout(30000) {
+                        Wallet.open(Network.REGTEST,recipientSeed,config,recipientArgs).use { assertEquals(17000uL,it.balance().spendableSats) }
+                    }
+                }
+            }
+        } finally { directory.deleteRecursively() }
+    }
+}
