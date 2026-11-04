@@ -554,3 +554,65 @@ extension ContractTests {
         guard case .paid = status else { return XCTFail("Expected a paid invoice, got \(status)") }
     }
 }
+
+extension ContractTests {
+    /// Waits for the next arkoor receive, or nil once `seconds` pass.
+    private func nextArkoorReceive(_ holder: NotificationHolder, within seconds: UInt64) async -> Movement? {
+        let wait = Task { () -> Movement? in
+            while let notification = try await holder.nextNotification() {
+                if case .movementCreated(let movement) = notification,
+                   movement.subsystemName == "bark.arkoor", movement.subsystemKind == "receive" { return movement }
+            }
+            return nil
+        }
+        let timeout = Task { try await Task.sleep(nanoseconds: seconds * 1_000_000_000); wait.cancel() }
+        defer { timeout.cancel() }
+        return try? await wait.value
+    }
+
+    func testLiveMailboxProcessorReceivesWithoutSync() async throws {
+        guard ProcessInfo.processInfo.environment["BARK_REGTEST"] == "1" else { throw XCTSkip("requires live RegTest") }
+        let directory = FileManager.default.temporaryDirectory.appendingPathComponent(UUID().uuidString)
+        defer { try? FileManager.default.removeItem(at: directory) }
+        let env = ProcessInfo.processInfo.environment
+        let config = Config(serverAddress: "http://127.0.0.1:\(env["ARK_PORT"] ?? "3635")", bitcoindAddress: "http://127.0.0.1:\(env["BITCOIN_PORT"] ?? "19443")", bitcoindUser: "second", bitcoindPass: "ark")
+        let mnemonic = try generateMnemonic()
+        let onchain = try await OnchainWallet.default(network: .regtest, mnemonic: mnemonic, config: config, datadir: directory.path)
+        let wallet = try await Wallet.openWithOnchain(network: .regtest, mnemonicOrSeed: mnemonic, config: config, args: WalletOpenArgs(runDaemon: false, datadir: directory.path, skipRecovery: true), onchain: onchain)
+        _ = try regtestCommand("send-to", try await onchain.newAddress(), "0.005")
+        _ = try await onchain.sync()
+        _ = try await wallet.boardAmount(amountSats: 100000)
+        _ = try regtestCommand("generate", "6")
+        try await wallet.sync()
+        let recipientSeed = try generateMnemonic()
+        let recipientArgs = WalletOpenArgs(runDaemon: false, datadir: directory.appendingPathComponent("recipient").path, skipRecovery: true)
+        do {
+            // The recipient never calls sync().
+            let recipient = try await Wallet.open(network: .regtest, mnemonicOrSeed: recipientSeed, config: config, args: recipientArgs)
+            let holder = recipient.notifications()
+            try await recipient.startMailboxProcessor()
+            try await recipient.startMailboxProcessor()
+            let address = try await recipient.newAddress()
+            _ = try await wallet.sendArkoorPayment(arkAddress: address, amountSats: 10000)
+            let sent = Date()
+            let received = await nextArkoorReceive(holder, within: 5)
+            XCTAssertEqual(received?.effectiveBalanceSats, 10000, "no arkoor receive within 5s without sync")
+            print("mailbox processor (Swift): receive notified \(Date().timeIntervalSince(sent))s after the send returned")
+            let balance = try await recipient.balance()
+            XCTAssertEqual(balance.spendableSats, 10000)
+
+            try await recipient.stopMailboxProcessor()
+            try await recipient.stopMailboxProcessor()
+            _ = try await wallet.sendArkoorPayment(arkAddress: address, amountSats: 7000)
+            let whileStopped = await nextArkoorReceive(holder, within: 3)
+            XCTAssertNil(whileStopped, "a stopped processor still received")
+            try await recipient.startMailboxProcessor()
+            let resumed = await nextArkoorReceive(holder, within: 5)
+            XCTAssertEqual(resumed?.effectiveBalanceSats, 7000, "restart did not pick up the waiting payment")
+            // Release the wallet while the processor runs.
+        }
+        let reopened = try await Wallet.open(network: .regtest, mnemonicOrSeed: recipientSeed, config: config, args: recipientArgs)
+        let reopenedBalance = try await reopened.balance()
+        XCTAssertEqual(reopenedBalance.spendableSats, 17000)
+    }
+}

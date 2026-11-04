@@ -7,6 +7,7 @@ use crate::config::Config;
 use crate::core::notification::NotificationHolder;
 use crate::core::wallet::{OpenArgs as CoreOpenArgs, Wallet as CoreWallet};
 use crate::ffi::db::open_sqlite_db;
+use crate::ffi::mailbox::MailboxProcessor;
 use crate::ffi::onchain::OnchainWallet;
 use crate::ffi::runtime::run_async;
 use crate::types::Network;
@@ -55,14 +56,15 @@ pub struct WalletOpenArgs {
 ///
 /// Wraps `core::Wallet` and adds:
 /// - Tokio runtime offload for asynchronous Bark work
-/// - daemon shutdown on drop
+/// - daemon and mailbox processor shutdown on drop
 /// - LNURL `pay_lightning_address`
-/// - Daemon control methods
+/// - Daemon and mailbox processor control methods
 /// - Notification holder
 /// - Callback onchain dispatch
 pub struct Wallet {
-    core: Arc<CoreWallet>,
+    pub(super) core: Arc<CoreWallet>,
     db_path: Arc<std::path::PathBuf>,
+    pub(super) mailbox: Arc<MailboxProcessor>,
 }
 
 /// Release reservations if foreign cancellation drops an undelivered result.
@@ -1312,14 +1314,23 @@ impl Wallet {
 
     /// Start the background daemon. The onchain wallet used by the daemon is
     /// the one supplied to `open_with_onchain` (`openWithOnchain` in Swift/Kotlin).
+    ///
+    /// The daemon processes the server mailbox itself, so this stops a running
+    /// mailbox processor first.
     pub async fn run_daemon(&self) -> Result<(), BarkError> {
         let inner = self.core.inner().clone();
-        run_async(async move { inner.start_daemon().map_err(BarkError::from) }).await?;
+        let mailbox = self.mailbox.clone();
+        run_async(async move {
+            mailbox.hand_to_daemon().await;
+            inner.start_daemon().map_err(BarkError::from)
+        })
+        .await?;
         Ok(())
     }
 
     pub async fn stop_daemon(&self) -> Result<(), BarkError> {
         self.core.inner().stop_daemon();
+        self.mailbox.daemon_stopped();
         Ok(())
     }
 
@@ -1327,13 +1338,56 @@ impl Wallet {
     /// nothing runs in the background afterwards (e.g. before deleting the
     /// wallet's datadir). No-op when no daemon is running.
     pub async fn stop_daemon_wait(&self) -> Result<(), BarkError> {
-        self.run(|core| async move { core.stop_daemon_wait().await })
-            .await
+        let mailbox = self.mailbox.clone();
+        self.run(|core| async move {
+            let stopped = core.stop_daemon_wait().await;
+            // Bark drops its daemon handle even when the wait fails.
+            mailbox.daemon_stopped();
+            stopped
+        })
+        .await
+    }
+
+    // ------------------------------------------------------------------------
+    // Mailbox processor
+    // ------------------------------------------------------------------------
+
+    /// Process the Ark server mailbox as messages arrive, for a wallet opened
+    /// with `run_daemon: false`.
+    ///
+    /// Incoming arkoor payments are added to the wallet, and their receive
+    /// movement reaches `notifications()`, without waiting for `sync()`. The
+    /// processor runs Bark's mailbox subscription: the same per-message
+    /// handling `sync()` does, which also claims Lightning receives the server
+    /// announces, finishes Lightning sends and completes this wallet's own
+    /// delegated round participations. It never joins a round. It reconnects
+    /// on its own and keeps running until `stop_mailbox_processor`, or until
+    /// the wallet is closed or dropped.
+    ///
+    /// Safe to run next to `sync()`, maintenance and payment calls. Calling it
+    /// again while it runs does nothing, and so does calling it while Bark's
+    /// daemon runs, because the daemon already processes the mailbox. Keep
+    /// calling `sync()` for everything else it does.
+    pub async fn start_mailbox_processor(&self) -> Result<(), BarkError> {
+        self.mailbox.start(&self.core);
+        Ok(())
+    }
+
+    /// Stop the mailbox processor and wait until it has stopped. A message
+    /// being processed finishes first. No-op when it is not running.
+    pub async fn stop_mailbox_processor(&self) -> Result<(), BarkError> {
+        let mailbox = self.mailbox.clone();
+        run_async(async move {
+            mailbox.stop().await;
+            Ok(())
+        })
+        .await
     }
 }
 
 impl Drop for Wallet {
     fn drop(&mut self) {
+        self.mailbox.cancel();
         self.core.inner().stop_daemon();
     }
 }
@@ -1347,6 +1401,7 @@ impl Wallet {
         onchain: Option<Arc<tokio::sync::RwLock<dyn bark::onchain::OnchainWalletTrait>>>,
     ) -> Result<Self, BarkError> {
         run_async(async move {
+            let daemon = args.run_daemon;
             let path = crate::ffi::db::sqlite_path(&args.datadir);
             if !args.create_if_not_exists {
                 crate::ffi::db::validate_existing_wallet(
@@ -1376,6 +1431,7 @@ impl Wallet {
             Ok(Self {
                 core: Arc::new(core),
                 db_path,
+                mailbox: Arc::new(MailboxProcessor::new(daemon)),
             })
         })
         .await

@@ -6,6 +6,42 @@ Names use the Rust spelling: Swift lowercases the first letter
 SCREAMING_SNAKE enum constants (`BarkErrorCode.EXIT_NON_STANDARD_VTXO`) and
 class names for variants (`BroadcastOutcome.Uncertain`).
 
+## Unreleased
+
+Bark stays at lib-0.8.0 (`959a489f`). Adds two `Wallet` methods; existing calls,
+the ABI of existing types and databases are unchanged.
+
+### Live mailbox processor
+
+`startMailboxProcessor()` keeps the wallet subscribed to its Ark server mailbox
+and applies messages as they arrive. A wallet opened with `runDaemon: false`
+now adds an incoming arkoor payment, and emits its `bark.arkoor` `receive`
+movement on `notifications()`, as soon as the payment lands. Before, that
+waited for the next `sync()`. On RegTest the movement arrives about 30 ms after
+the sender's `sendArkoorPayment` returns.
+
+- It runs Bark's `subscribe_process_mailbox_messages`, which handles each
+  message the way `sync()` does: arkoor receives, Lightning receive notices
+  (the payment is claimed), Lightning send results and the completion of this
+  wallet's own delegated round participations. It never joins a round.
+- It is safe next to `sync()`, maintenance and payment calls. Bark serializes
+  the receive check and only moves the mailbox checkpoint forward, so each
+  payment is recorded once.
+- After the stream drops it resubscribes after 1 s, backing off to 30 s while
+  the server stays unreachable, and resumes from the stored checkpoint.
+- Calling `startMailboxProcessor()` again while it runs does nothing. While
+  Bark's daemon runs (`runDaemon: true` or `runDaemon()`) it does nothing either,
+  because the daemon processes the mailbox itself; `runDaemon()` stops a
+  running processor first.
+- `stopMailboxProcessor()` returns once it has stopped; a message being
+  processed finishes first. Closing or dropping the wallet stops it without
+  waiting.
+- Keep calling `sync()`: it still does everything else (fees, pending rounds,
+  boards, offboards, Lightning sends and exits).
+
+Its own log records use the `[MAILBOX]` prefix and cover start, stop and
+resubscribe reasons, never message contents, keys or addresses.
+
 ## 0.7.3
 
 Bark stays at lib-0.8.0 (`959a489f`). No API change; databases open unchanged.

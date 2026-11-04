@@ -79,6 +79,28 @@ different claims. Record them separately; do not mark one from evidence of anoth
 
 ## Tasks
 
+### 29 — Live mailbox processor
+
+Plan: `src/ffi/mailbox.rs` runs Bark's `subscribe_process_mailbox_messages`
+on the SDK runtime for wallets opened without the daemon, restarting it after
+1 s (backing off to 30 s) when the stream gives up. `Wallet` gains async
+`start_mailbox_processor` (idempotent; no-op while the daemon runs) and
+`stop_mailbox_processor` (cancels and waits). `run_daemon` stops a running
+processor before the daemon takes the mailbox; `Drop` cancels without waiting.
+The task holds a strong wallet reference because Bark's weak variant is
+crate-private, so cancellation on drop is what releases it. Bark's handler is
+the one `sync()` uses: arkoor dedup under its processing lock and a monotonic
+checkpoint make it safe next to `sync()`. New API, so a minor release.
+
+- [x] Feasibility: Bark handler, concurrency, BoltFFI shape, teardown, mailbox auth.
+- [x] Offline lifecycle test: start twice, retry while unreachable, stop/restart, daemon hand-over, drop releases the wallet.
+- [x] Live RegTest Rust test: arkoor receive notified without `sync()`, stopped processor leaves the payment waiting, restart resumes, receives recorded once next to `sync()`.
+- [ ] Live Swift and Kotlin contract tests.
+- [ ] PR CI and review.
+- [ ] Main CI full matrix.
+- [ ] Stage CI artifacts and move install docs.
+- [ ] Publish.
+
 ### 28 — Onchain reads no longer wait for a sync (v0.7.3)
 
 Plan: in `src/core/onchain.rs`, Esplora `sync` and `initialScan` build the

@@ -1,6 +1,7 @@
 pub mod custom_onchain_wallet;
 pub mod db;
 pub mod logger;
+pub(crate) mod mailbox;
 pub mod onchain;
 pub mod runtime;
 pub mod wallet;
