@@ -81,23 +81,26 @@ different claims. Record them separately; do not mark one from evidence of anoth
 
 ### 29 — Live mailbox processor (v0.8.0)
 
-Plan: `src/ffi/mailbox.rs` runs Bark's `subscribe_process_mailbox_messages`
-on the SDK runtime for wallets opened without the daemon, restarting it after
-1 s (backing off to 30 s) when the stream gives up. `Wallet` gains async
+Plan: `src/ffi/mailbox.rs` keeps Bark's `subscribe_mailbox_messages` stream
+open on the SDK runtime for wallets opened without the daemon and runs Bark's
+`sync_mailbox` for each new message, resubscribing after 1 s (backing off to
+30 s) when the stream ends or a message fails. `Wallet` gains async
 `start_mailbox_processor` (idempotent; no-op while the daemon runs) and
 `stop_mailbox_processor` (cancels and waits). `run_daemon` stops a running
 processor before the daemon takes the mailbox; `Drop` cancels without waiting.
-Start, stop and daemon start/stop hold one async lock through completion. The
-task holds a strong wallet reference because Bark's weak variant is
-crate-private, so cancellation on drop is what releases it; a cancelled
-subscription gets 5 s to return before it is dropped, because Bark doesn't
-check its token while connecting. Bark's handler is
+Start, stop and daemon start/stop hold one async lock through completion, and a
+non-waiting daemon stop keeps it until the daemon has ended. Only connecting
+and waiting are cancelled; a `sync_mailbox` in progress always finishes,
+because Bark stores a received VTXO before its movement and skips known VTXOs
+on redelivery. Bark's `subscribe_process_mailbox_messages` was not used: its
+connect step ignores the token and its weak variant is crate-private. The task
+holds a strong wallet reference, released when drop cancels it. Bark's handler is
 the one `sync()` uses: arkoor dedup under its processing lock and a monotonic
 checkpoint make it safe next to `sync()`. New API, so a minor release.
 
 - [x] Feasibility: Bark handler, concurrency, BoltFFI shape, teardown, mailbox auth.
 - [x] Offline lifecycle test: start twice, retry while unreachable, stop/restart, daemon hand-over, drop releases the wallet.
-- [x] Concurrent stop/start and daemon start/stop are serialized; a stuck subscription is dropped 5 s after stop or close.
+- [x] Concurrent stop/start and daemon start/stop are serialized; stop and close interrupt a stalled connection.
 - [x] Live RegTest Rust test: arkoor receive notified without `sync()`, stopped processor leaves the payment waiting, restart resumes, receives recorded once next to `sync()`.
 - [x] Live Swift and Kotlin contract tests.
 - [ ] PR CI and review.

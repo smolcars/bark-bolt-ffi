@@ -20,25 +20,27 @@ movement on `notifications()`, as soon as the payment lands. Before, that
 waited for the next `sync()`. On RegTest the movement arrives about 30 ms after
 the sender's `sendArkoorPayment` returns.
 
-- It runs Bark's `subscribe_process_mailbox_messages`, which handles each
-  message the way `sync()` does: arkoor receives, Lightning receive notices
-  (the payment is claimed), Lightning send results and the completion of this
+- For each new mailbox message it runs Bark's `sync_mailbox`, the mailbox step
+  of `sync()`. That handles arkoor receives, Lightning receive notices (the
+  payment is claimed), Lightning send results and the completion of this
   wallet's own delegated round participations. It never joins a round.
 - It is safe next to `sync()`, maintenance and payment calls. Bark serializes
   the receive check and only moves the mailbox checkpoint forward, so each
   payment is recorded once.
-- After the stream drops it resubscribes after 1 s, backing off to 30 s while
-  the server stays unreachable, and resumes from the stored checkpoint.
+- After the stream drops, or a message fails, it resubscribes after 1 s,
+  backing off to 30 s while that keeps happening, and resumes from the stored
+  checkpoint.
 - Calling `startMailboxProcessor()` again while it runs does nothing. While
   Bark's daemon runs (`runDaemon: true` or `runDaemon()`) it does nothing either,
   because the daemon processes the mailbox itself; `runDaemon()` stops a
   running processor first.
-- `stopMailboxProcessor()` returns once it has stopped, within about 5 s: a
-  message being processed gets that long to finish. Bark can't be interrupted
-  while it connects, so a subscription still connecting or busy after 5 s is
-  dropped, and the server delivers the message again later. Closing or
-  dropping the wallet stops it the same way without waiting. Start, stop and
-  the daemon calls run one at a time, so a start never overlaps a stop.
+- `stopMailboxProcessor()` returns once it has stopped. Connecting and
+  waiting for messages are interrupted at once; a mailbox sync in progress
+  finishes first, because Bark can't resume a message cut short after storing
+  its VTXOs. Closing or dropping the wallet stops it the same way without
+  waiting. Start, stop and the daemon calls run one at a time, and the
+  processor can't start until a stopped daemon has ended, so there is never
+  more than one of them.
 - Keep calling `sync()`: it still does everything else (fees, pending rounds,
   boards, offboards, Lightning sends and exits).
 

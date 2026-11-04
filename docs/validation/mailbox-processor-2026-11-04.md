@@ -29,6 +29,22 @@ Other agents' stacks, simulators and emulators were not touched.
 - `subscribe_process_mailbox_messages_weak` is crate-private, so the task holds a
   strong wallet reference and the wallet's `Drop` cancels it.
 
+## Design after review
+
+Review (GPT-6.1 Sol, high) found that Bark's `subscribe_process_mailbox_messages`
+doesn't check its token while connecting (the subscribe request deadline is an
+hour), and that dropping it mid-message can lose a receive movement: Bark stores
+the VTXOs, then awaits the recovery-mailbox post, then records the movement
+(`vtxo/mod.rs:310`, `mailbox.rs:521`), and skips known VTXOs on redelivery
+(`mailbox.rs:499`). So the processor uses Bark's public pieces instead:
+`subscribe_mailbox_messages` (`mailbox.rs:142`) as the wake-up stream, whose
+connect and wait are cancelled freely, and `sync_mailbox` (`mailbox.rs:297`), the
+mailbox step of `sync()`, for each new message, which always runs to completion.
+A message `sync()` already applied is skipped by checkpoint; one that failed is
+retried by resubscribing after the backoff. Start, stop and daemon start/stop
+hold one async lock until they finish, and a non-waiting `stopDaemon()` keeps it
+until Bark's daemon has ended.
+
 ## Results (local, 2026-11-04, macOS ARM64)
 
 - No-sync arrival, measured from `sendArkoorPayment` returning to the
@@ -47,13 +63,16 @@ Other agents' stacks, simulators and emulators were not touched.
   server): start twice spawns one task; the task survives failed subscriptions;
   stop waits and restart spawns anew; `runDaemon` stops it and blocks starts
   until `stopDaemonWait`; drop releases the wallet.
-- Review fixes, tested with a stand-in subscription (no server):
+- Review fixes, without RegTest:
   `stop_holds_the_lifecycle_until_the_task_ends` (a concurrent stop returns
-  only after the stopping task ended and a concurrent start doesn't overlap it;
-  it fails with the original take-then-join `stop`),
-  `daemon_start_and_stop_are_serialized` and
-  `stop_and_close_abandon_a_stuck_subscription` (a subscription that never
-  returns is dropped within 5 s of stop or close and releases its references).
+  only after a slow-stopping task ended, and a concurrent start doesn't overlap
+  it; fails with the original take-then-join `stop`);
+  `daemon_start_and_stop_are_serialized` (a concurrent daemon start and stop
+  apply in order, and a start waits for a daemon stopped without waiting to
+  end; fails when that stop clears the flag at once);
+  `stop_and_close_interrupt_a_stalled_subscription` (against a server that
+  accepts the connection and never answers, stop returns in under 1 s and
+  dropping the wallet releases it in under 1 s).
 - `BARK_REGTEST=1 cargo test --locked -- --test-threads=1`: 97 unit, 1
   exit-estimate, 1 payments and 6 of 7 prepared-board tests passed;
   `live_prepared_board_never_spends_excluded_outpoints` failed its
@@ -77,8 +96,6 @@ Other agents' stacks, simulators and emulators were not touched.
 ## Limits
 
 The example apps were not changed or rerun. Noah does not call the processor
-yet. Bark doesn't check the token while it connects, so a subscription still
-connecting or busy 5 s after a stop or close is dropped rather than awaited;
-that is covered with a stuck stand-in subscription, not a stalled live server.
-Physical devices were not run. Hosted CI, review and publication are recorded
-separately.
+yet. A stop waits for a mailbox sync in progress, which, like `sync()`, waits
+on the server. Each new message costs one extra mailbox read. Physical devices
+were not run. Hosted CI, review and publication are recorded separately.

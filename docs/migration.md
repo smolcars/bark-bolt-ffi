@@ -503,8 +503,8 @@ New and changed behaviour:
 Without the daemon, incoming arkoor payments used to reach the wallet, and its
 `notifications()` stream, only on the next `sync()`. `startMailboxProcessor()`
 keeps a mailbox subscription open on the SDK runtime so they arrive as soon as
-the server delivers them. It runs Bark's own mailbox processing, the same
-per-message handling `sync()` does, and never joins a round. See the
+the server delivers them. For each new message it runs Bark's `sync_mailbox`,
+the mailbox step of `sync()`, and it never joins a round. See the
 [changelog](../CHANGELOG.md) for what it processes and how it reconnects.
 
 Swift:
@@ -527,7 +527,6 @@ wallet.stopMailboxProcessor()    // background; returns once stopped
 wallet.close()                   // also stops it, without waiting
 ```
 
-`stopMailboxProcessor()` returns within about 5 seconds: a message being
-processed gets that long to finish, and a subscription still connecting or busy
-after it is dropped; the server delivers that message again later. The
-processor does not replace `sync()`.
+`stopMailboxProcessor()` interrupts connecting and waiting at once and lets a
+mailbox sync in progress finish, so it returns about as fast as a `sync()`
+would reach the server. The processor does not replace `sync()`.

@@ -1,9 +1,10 @@
 //! Live Ark mailbox processing for wallets opened without Bark's daemon.
 //!
-//! Runs Bark's own `subscribe_process_mailbox_messages` on the SDK runtime, so
-//! arkoor receives, Lightning receive notices and delegated round completions
-//! are applied as the server delivers them instead of on the next `sync()`.
-//! Each message goes through the same Bark handler `sync()` uses, which
+//! Keeps a mailbox subscription open on the SDK runtime and, for each new
+//! message, runs Bark's `sync_mailbox`: the mailbox step of `sync()`, with the
+//! same per-message handler Bark's daemon uses. Arkoor receives, Lightning
+//! receive notices and delegated round completions are therefore applied as
+//! the server delivers them instead of on the next `sync()`. That handler
 //! serializes the arkoor dedup and only moves the checkpoint forward, so the
 //! processor can run next to `sync()` and payment calls.
 
@@ -11,6 +12,7 @@ use std::future::Future;
 use std::sync::Arc;
 use std::time::{Duration, Instant};
 
+use futures_util::StreamExt;
 use log::{info, warn};
 use tokio::sync::Mutex;
 use tokio::task::JoinHandle;
@@ -19,16 +21,11 @@ use tokio_util::sync::CancellationToken;
 use crate::core::wallet::Wallet as CoreWallet;
 use crate::ffi::runtime::TOKIO_RT;
 
-/// First wait before resubscribing after Bark's subscription gives up.
+/// First wait before resubscribing after the subscription fails or ends.
 const RESTART_DELAY: Duration = Duration::from_secs(1);
-/// Longest wait between resubscribes while the server stays unreachable. A
-/// subscription that lasted at least this long starts over at `RESTART_DELAY`.
+/// Longest wait between resubscribes while the server stays unreachable or a
+/// message keeps failing.
 const MAX_RESTART_DELAY: Duration = Duration::from_secs(30);
-/// How long a cancelled subscription may take to return. Bark checks for
-/// cancellation between messages, so a message in flight finishes; it doesn't
-/// while connecting. After this the subscription is dropped, as if the app had
-/// been killed, and Bark resumes from the unadvanced checkpoint next time.
-const STOP_GRACE: Duration = Duration::from_secs(5);
 
 struct Task {
     shutdown: CancellationToken,
@@ -49,9 +46,9 @@ struct State {
 ///
 /// Every lifecycle change, daemon start and stop included, holds `state` until
 /// it has finished. A start therefore never overlaps a stop that is still
-/// waiting for its task, and `daemon` always matches Bark's daemon.
+/// waiting for its task, or a daemon that is still shutting down.
 pub(crate) struct MailboxProcessor {
-    state: Mutex<State>,
+    state: Arc<Mutex<State>>,
     /// Cancelled when the wallet is dropped; each task's token is a child.
     closed: CancellationToken,
 }
@@ -59,10 +56,10 @@ pub(crate) struct MailboxProcessor {
 impl MailboxProcessor {
     pub(crate) fn new(daemon: bool) -> Self {
         Self {
-            state: Mutex::new(State {
+            state: Arc::new(Mutex::new(State {
                 daemon,
                 ..State::default()
-            }),
+            })),
             closed: CancellationToken::new(),
         }
     }
@@ -70,21 +67,13 @@ impl MailboxProcessor {
     /// Start the processor unless it already runs or the daemon does.
     pub(crate) async fn start(&self, core: &Arc<CoreWallet>) {
         let core = core.clone();
-        self.start_with(move |shutdown| {
-            let core = core.clone();
-            async move {
-                core.inner()
-                    .subscribe_process_mailbox_messages(None, shutdown)
-                    .await
-            }
-        })
-        .await
+        self.start_with(move |shutdown| run(core, shutdown)).await
     }
 
-    async fn start_with<F, Fut>(&self, subscribe: F)
+    async fn start_with<F, Fut>(&self, body: F)
     where
-        F: FnMut(CancellationToken) -> Fut + Send + 'static,
-        Fut: Future<Output = anyhow::Result<()>> + Send + 'static,
+        F: FnOnce(CancellationToken) -> Fut,
+        Fut: Future<Output = ()> + Send + 'static,
     {
         let mut state = self.state.lock().await;
         if state.daemon {
@@ -95,7 +84,7 @@ impl MailboxProcessor {
             return;
         }
         let shutdown = self.closed.child_token();
-        let handle = TOKIO_RT.spawn(run(subscribe, shutdown.clone()));
+        let handle = TOKIO_RT.spawn(body(shutdown.clone()));
         state.task = Some(Task { shutdown, handle });
         #[cfg(test)]
         {
@@ -110,7 +99,7 @@ impl MailboxProcessor {
     }
 
     /// Stop the processor, then start Bark's daemon with `start_daemon`. The
-    /// processor stays off until [`Self::stop_daemon`].
+    /// processor stays off until the daemon is stopped.
     pub(crate) async fn hand_to_daemon(
         &self,
         start_daemon: impl FnOnce() -> anyhow::Result<()>,
@@ -125,7 +114,8 @@ impl MailboxProcessor {
         Ok(())
     }
 
-    /// Stop Bark's daemon with `stop_daemon`; the processor may start again.
+    /// Stop Bark's daemon by awaiting `stop_daemon`, which must end once the
+    /// daemon's tasks have; the processor may start again afterwards.
     pub(crate) async fn stop_daemon<T>(&self, stop_daemon: impl Future<Output = T>) -> T {
         let mut state = self.state.lock().await;
         let stopped = stop_daemon.await;
@@ -134,8 +124,21 @@ impl MailboxProcessor {
         stopped
     }
 
+    /// Like [`Self::stop_daemon`], but returns once the stop has begun. The
+    /// processor still can't start until `stop_daemon` has ended.
+    pub(crate) async fn stop_daemon_in_background(
+        &self,
+        stop_daemon: impl Future<Output = ()> + Send + 'static,
+    ) {
+        let mut state = self.state.clone().lock_owned().await;
+        TOKIO_RT.spawn(async move {
+            stop_daemon.await;
+            state.daemon = false;
+        });
+    }
+
     /// Stop the processor without waiting, for the wallet's `Drop`. Its task
-    /// releases the wallet within `STOP_GRACE`.
+    /// releases the wallet once a mailbox sync in progress has finished.
     pub(crate) fn close(&self) {
         self.closed.cancel();
     }
@@ -150,36 +153,65 @@ async fn stop_task(state: &mut State) {
     }
 }
 
-/// Resubscribe until cancelled. `subscribe` owns the wallet reference, so it
-/// is released when this returns.
-async fn run<F, Fut>(mut subscribe: F, shutdown: CancellationToken)
-where
-    F: FnMut(CancellationToken) -> Fut,
-    Fut: Future<Output = anyhow::Result<()>>,
-{
+/// Subscribe to the mailbox and run `sync_mailbox` for each new message,
+/// resubscribing until cancelled.
+///
+/// Only connecting and waiting for a message are cancelled; they change
+/// nothing. A `sync_mailbox` in progress always finishes: Bark stores a
+/// received VTXO before recording its movement and skips known VTXOs on
+/// redelivery, so an interrupted message would lose its movement.
+async fn run(core: Arc<CoreWallet>, shutdown: CancellationToken) {
     info!("[MAILBOX] Processor started");
+    let wallet = core.inner();
     let mut delay = RESTART_DELAY;
-    loop {
+    'subscribe: loop {
         let started = Instant::now();
-        // Boxed: Bark's subscription future is large.
-        let mut subscription = Box::pin(subscribe(shutdown.clone()));
-        let result = tokio::select! {
-            result = &mut subscription => result,
-            _ = shutdown.cancelled() => {
-                if tokio::time::timeout(STOP_GRACE, subscription).await.is_err() {
-                    warn!("[MAILBOX] Subscription still busy after {STOP_GRACE:?}; dropping it");
-                }
-                break;
-            }
+        let mut progressed = false;
+        let subscribed = tokio::select! {
+            subscribed = wallet.subscribe_mailbox_messages(None) => subscribed,
+            _ = shutdown.cancelled() => break,
         };
-        if shutdown.is_cancelled() {
-            break;
+        match subscribed {
+            Err(error) => warn!("[MAILBOX] Mailbox subscription failed: {error:#}"),
+            Ok(mut stream) => loop {
+                let message = tokio::select! {
+                    message = stream.next() => message,
+                    _ = shutdown.cancelled() => break 'subscribe,
+                };
+                let checkpoint = match message {
+                    Some(Ok(message)) => message.checkpoint,
+                    Some(Err(error)) => {
+                        info!("[MAILBOX] Mailbox stream failed: {error:#}");
+                        break;
+                    }
+                    None => {
+                        info!("[MAILBOX] Mailbox stream ended");
+                        break;
+                    }
+                };
+                // A sync() may already have applied it.
+                if wallet.get_mailbox_checkpoint().await.unwrap_or(0) >= checkpoint {
+                    continue;
+                }
+                // Boxed: Bark's mailbox future is large.
+                let synced = Box::pin(wallet.sync_mailbox()).await;
+                if shutdown.is_cancelled() {
+                    break 'subscribe;
+                }
+                if let Err(error) = synced {
+                    warn!("[MAILBOX] Mailbox sync failed: {error:#}");
+                    break;
+                }
+                // Bark stops at a message that failed without advancing the
+                // checkpoint; resubscribing redelivers it after the delay.
+                if wallet.get_mailbox_checkpoint().await.unwrap_or(0) < checkpoint {
+                    warn!("[MAILBOX] A mailbox message failed; retrying");
+                    break;
+                }
+                progressed = true;
+            },
         }
-        match result {
-            Ok(()) => warn!("[MAILBOX] Mailbox stream ended; resubscribing"),
-            Err(error) => warn!("[MAILBOX] Mailbox stream failed; resubscribing: {error:#}"),
-        }
-        if started.elapsed() >= MAX_RESTART_DELAY {
+        if progressed || started.elapsed() >= MAX_RESTART_DELAY {
             delay = RESTART_DELAY;
         }
         tokio::select! {
@@ -199,11 +231,29 @@ mod tests {
 
     use tokio_util::sync::CancellationToken;
 
-    use super::{MailboxProcessor, STOP_GRACE};
+    use super::MailboxProcessor;
     use crate::ffi::runtime::TOKIO_RT;
     use crate::ffi::wallet::{Wallet, WalletOpenArgs};
     use crate::types::{Network, WalletNotification};
     use crate::Config;
+
+    /// A task that takes 300 ms to end once cancelled, like a mailbox sync in
+    /// progress, and sets `ended` when it has.
+    fn lingering(ended: Arc<AtomicBool>) -> impl FnOnce(CancellationToken) -> BoxedTask {
+        move |shutdown| {
+            Box::pin(async move {
+                shutdown.cancelled().await;
+                tokio::time::sleep(Duration::from_millis(300)).await;
+                ended.store(true, SeqCst);
+            })
+        }
+    }
+
+    type BoxedTask = std::pin::Pin<Box<dyn std::future::Future<Output = ()> + Send>>;
+
+    fn idle(shutdown: CancellationToken) -> BoxedTask {
+        Box::pin(async move { shutdown.cancelled().await })
+    }
 
     /// A stopping task still owns the lifecycle: a concurrent stop returns
     /// only once it has ended, and a concurrent start can't run next to it.
@@ -212,19 +262,7 @@ mod tests {
         TOKIO_RT.block_on(async {
             let processor = MailboxProcessor::new(false);
             let ended = Arc::new(AtomicBool::new(false));
-            let flag = ended.clone();
-            // Takes 300 ms to return once cancelled, like a message in flight.
-            processor
-                .start_with(move |shutdown: CancellationToken| {
-                    let flag = flag.clone();
-                    async move {
-                        shutdown.cancelled().await;
-                        tokio::time::sleep(Duration::from_millis(300)).await;
-                        flag.store(true, SeqCst);
-                        Ok(())
-                    }
-                })
-                .await;
+            processor.start_with(lingering(ended.clone())).await;
             let overlapped = Arc::new(AtomicBool::new(false));
             let later = || tokio::time::sleep(Duration::from_millis(50));
             let (_, second_stop_saw_end, _) = tokio::join!(
@@ -236,47 +274,32 @@ mod tests {
                 },
                 async {
                     later().await;
-                    let (ended, overlapped) = (ended.clone(), overlapped.clone());
                     processor
-                        .start_with(move |shutdown: CancellationToken| {
-                            overlapped.fetch_or(!ended.load(SeqCst), SeqCst);
-                            async move {
-                                shutdown.cancelled().await;
-                                Ok(())
-                            }
+                        .start_with(|shutdown| {
+                            overlapped.store(!ended.load(SeqCst), SeqCst);
+                            idle(shutdown)
                         })
                         .await;
                 },
             );
             assert!(second_stop_saw_end, "a concurrent stop returned early");
-            assert_eq!(processor.state.lock().await.spawned, 2);
-            processor.stop().await;
             assert!(
                 !overlapped.load(SeqCst),
                 "a start ran next to the stopping task"
             );
+            assert_eq!(processor.state.lock().await.spawned, 2);
+            processor.stop().await;
         });
     }
 
-    /// `run_daemon` and a concurrent `stop_daemon` apply in order, so the
-    /// daemon flag matches the daemon afterwards.
+    /// `run_daemon` and a concurrent `stop_daemon` apply in order, and a
+    /// processor can't start until a daemon stopped without waiting has ended.
     #[test]
     fn daemon_start_and_stop_are_serialized() {
         TOKIO_RT.block_on(async {
             let processor = MailboxProcessor::new(false);
             let ended = Arc::new(AtomicBool::new(false));
-            let flag = ended.clone();
-            processor
-                .start_with(move |shutdown: CancellationToken| {
-                    let flag = flag.clone();
-                    async move {
-                        shutdown.cancelled().await;
-                        tokio::time::sleep(Duration::from_millis(300)).await;
-                        flag.store(true, SeqCst);
-                        Ok(())
-                    }
-                })
-                .await;
+            processor.start_with(lingering(ended.clone())).await;
             let daemon = Arc::new(AtomicBool::new(false));
             let (started, _) = tokio::join!(
                 processor.hand_to_daemon(|| {
@@ -296,49 +319,96 @@ mod tests {
             );
             started.unwrap();
             assert!(!processor.state.lock().await.daemon);
+
+            // A daemon whose tasks take 300 ms to end after a non-waiting stop.
+            processor.hand_to_daemon(|| Ok(())).await.unwrap();
+            daemon.store(true, SeqCst);
+            let flag = daemon.clone();
             processor
-                .start_with(|shutdown: CancellationToken| async move {
-                    shutdown.cancelled().await;
-                    Ok(())
+                .stop_daemon_in_background(async move {
+                    tokio::time::sleep(Duration::from_millis(300)).await;
+                    flag.store(false, SeqCst);
                 })
                 .await;
+            let overlapped = AtomicBool::new(true);
+            processor
+                .start_with(|shutdown| {
+                    overlapped.store(daemon.load(SeqCst), SeqCst);
+                    idle(shutdown)
+                })
+                .await;
+            assert!(
+                !overlapped.load(SeqCst),
+                "the processor started next to the daemon"
+            );
             assert_eq!(processor.state.lock().await.spawned, 2);
             processor.stop().await;
         });
     }
 
-    /// Bark doesn't check its token while connecting: a subscription that
-    /// never returns is abandoned after `STOP_GRACE` on stop and on close,
-    /// releasing what it holds.
+    /// Connecting is interrupted on stop and on close: a server that accepts
+    /// the connection and never answers holds neither up.
     #[test]
-    fn stop_and_close_abandon_a_stuck_subscription() {
+    fn stop_and_close_interrupt_a_stalled_subscription() {
+        let esplora = esplora_stub();
+        // Open while nothing listens, then accept connections and never answer.
+        let port = std::net::TcpListener::bind("127.0.0.1:0")
+            .unwrap()
+            .local_addr()
+            .unwrap()
+            .port();
         TOKIO_RT.block_on(async {
-            let processor = MailboxProcessor::new(false);
+            let directory = tempfile::tempdir().unwrap();
+            let config: Config = serde_json::from_value(serde_json::json!({
+                "server_address": format!("http://127.0.0.1:{port}"),
+                "esplora_address": esplora,
+            }))
+            .unwrap();
+            let wallet = Wallet::open(
+                Network::Regtest,
+                crate::generate_mnemonic().unwrap(),
+                config,
+                args(directory.path()),
+            )
+            .await
+            .unwrap();
+            let silent = std::net::TcpListener::bind(("127.0.0.1", port)).unwrap();
+            let (accepted_tx, accepted) = std::sync::mpsc::channel();
+            std::thread::spawn(move || {
+                let mut held = Vec::new();
+                for stream in silent.incoming().flatten() {
+                    held.push(stream);
+                    let _ = accepted_tx.send(());
+                }
+            });
             for close in [false, true] {
-                let probe = Arc::new(());
-                let held = Arc::downgrade(&probe);
-                processor
-                    .start_with(move |_shutdown: CancellationToken| {
-                        let probe = probe.clone();
-                        async move {
-                            let _probe = probe;
-                            std::future::pending::<anyhow::Result<()>>().await
-                        }
-                    })
-                    .await;
-                tokio::time::sleep(Duration::from_millis(100)).await;
+                wallet.start_mailbox_processor().await.unwrap();
+                accepted
+                    .recv_timeout(Duration::from_secs(10))
+                    .expect("the processor never connected");
+                tokio::time::sleep(Duration::from_millis(500)).await;
+                assert!(
+                    running(&wallet),
+                    "the stalled subscription ended on its own"
+                );
                 let stopping = Instant::now();
                 if close {
-                    processor.close();
-                } else {
-                    processor.stop().await;
+                    let core = Arc::downgrade(&wallet.core);
+                    wallet.mailbox.close();
+                    released_after_drop(core, wallet).await;
+                    break;
                 }
-                while held.strong_count() > 0 {
-                    assert!(stopping.elapsed() < STOP_GRACE + Duration::from_secs(2));
-                    tokio::time::sleep(Duration::from_millis(20)).await;
-                }
+                wallet.stop_mailbox_processor().await.unwrap();
+                assert!(stopping.elapsed() < Duration::from_secs(1));
             }
         });
+    }
+
+    async fn released_after_drop(core: Weak<crate::core::wallet::Wallet>, wallet: Wallet) {
+        drop(wallet);
+        tokio::time::timeout(Duration::from_secs(1), released(core))
+            .await
+            .expect("close waited on the stalled subscription");
     }
 
     fn spawned(wallet: &Wallet) -> usize {

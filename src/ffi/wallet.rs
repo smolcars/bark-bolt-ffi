@@ -1329,11 +1329,19 @@ impl Wallet {
         .await
     }
 
+    /// Signal the background daemon to stop, without waiting for it.
     pub async fn stop_daemon(&self) -> Result<(), BarkError> {
-        let inner = self.core.inner().clone();
+        let core = self.core.clone();
         let mailbox = self.mailbox.clone();
         run_async(async move {
-            mailbox.stop_daemon(async { inner.stop_daemon() }).await;
+            // The mailbox processor can't start until the daemon has ended.
+            mailbox
+                .stop_daemon_in_background(async move {
+                    if let Err(error) = core.stop_daemon_wait().await {
+                        log::warn!("Daemon stop failed: {}", error.message);
+                    }
+                })
+                .await;
             Ok(())
         })
         .await
@@ -1356,11 +1364,11 @@ impl Wallet {
     /// with `run_daemon: false`.
     ///
     /// Incoming arkoor payments are added to the wallet, and their receive
-    /// movement reaches `notifications()`, without waiting for `sync()`. The
-    /// processor runs Bark's mailbox subscription: the same per-message
-    /// handling `sync()` does, which also claims Lightning receives the server
-    /// announces, finishes Lightning sends and completes this wallet's own
-    /// delegated round participations. It never joins a round. It reconnects
+    /// movement reaches `notifications()`, without waiting for `sync()`. For
+    /// each new mailbox message the processor runs Bark's `sync_mailbox`, the
+    /// mailbox step of `sync()`, which also claims Lightning receives the
+    /// server announces, finishes Lightning sends and completes this wallet's
+    /// own delegated round participations. It never joins a round. It reconnects
     /// on its own and keeps running until `stop_mailbox_processor`, or until
     /// the wallet is closed or dropped.
     ///
@@ -1378,10 +1386,9 @@ impl Wallet {
         .await
     }
 
-    /// Stop the mailbox processor and wait until it has stopped, at most about
-    /// 5 seconds. A message being processed gets that long to finish; after
-    /// it, or while the subscription is still connecting, it is abandoned and
-    /// the server delivers it again next time. No-op when it is not running.
+    /// Stop the mailbox processor and wait until it has stopped. Connecting
+    /// and waiting are interrupted; a mailbox sync in progress finishes first.
+    /// No-op when it is not running.
     pub async fn stop_mailbox_processor(&self) -> Result<(), BarkError> {
         let mailbox = self.mailbox.clone();
         run_async(async move {
