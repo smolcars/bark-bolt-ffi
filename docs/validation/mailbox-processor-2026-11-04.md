@@ -107,6 +107,32 @@ stop/start, daemon flag races, connect not cancellable), round 2 found S4
 (forced drop could lose a receive movement) and S2 still open for the
 non-waiting daemon stop, and round 3 approved `caeb918` with all four resolved.
 
+## Hosted CI
+
+PR [#10](https://github.com/smolcars/bark-bolt-ffi/pull/10) passed `rust`,
+`apple` and `android` at `a061c50` (the first `android` attempt failed the
+flaky test below; the rerun passed) and merged as `bb14e6a`.
+
+Main run [41887941694](https://github.com/smolcars/bark-bolt-ffi/actions/runs/41887941694)
+at `bb14e6a`: `rust` and `apple` (full five-slice Apple build, Swift contracts,
+iOS app tests) passed. `android` built the release AAR and JVM JAR, passed the
+API parity check, the Gradle build with the JVM and packaged-JAR contract tests,
+the 16 KB alignment check and the Kotlin artifact check, then failed both
+attempts at `live_prepared_board_never_spends_excluded_outpoints`, so the
+emulator step (Android UI tests, live Kotlin tests, Android app RegTest) did not
+run for this commit. That test assumes BDK picks the larger of two coins, but
+BDK's default selection falls back to a random draw; it failed the same way on
+v0.7.3's main run and, run alone locally, passed 5 of 14 times before #10 and
+6 of 10 after. The release uses these binaries by decision.
+
+Apple artifact 13353315334 (sha256 `6b7bd38a…41c8`) was staged with
+[v080-stage-ci.py](v080-stage-ci.py); XCFramework sha256
+`bcadced292d63df92cad7f5e02ba6ce2037b2c0304edb1e680fe7e48559d26c2`. The
+generated Swift gains only `startMailboxProcessor()` and `stopMailboxProcessor()`.
+The AAR and JVM JAR come from Android artifact 13435622595 (sha256
+`7326cbe7…25cf2`); the AAR has 0x4000 LOAD alignment on all three ABIs and both
+carry the two new suspend methods.
+
 ## Limits
 
 The example apps were not changed or rerun. Noah does not call the processor

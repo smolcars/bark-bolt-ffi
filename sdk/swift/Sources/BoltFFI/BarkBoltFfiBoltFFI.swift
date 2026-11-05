@@ -7342,6 +7342,9 @@ public final class Wallet {
 
     /// Start the background daemon. The onchain wallet used by the daemon is
     /// the one supplied to `open_with_onchain` (`openWithOnchain` in Swift/Kotlin).
+    ///
+    /// The daemon processes the server mailbox itself, so this stops a running
+    /// mailbox processor first.
     public func runDaemon() async throws {
         let boltffiFuture = boltffi_method_class_bark_bolt_ffi_ffi_wallet_wallet_run_daemon(self.handle)
         return try await boltffiAsyncCall(
@@ -7362,6 +7365,7 @@ public final class Wallet {
         }
     }
 
+    /// Signal the background daemon to stop, without waiting for it.
     public func stopDaemon() async throws {
         let boltffiFuture = boltffi_method_class_bark_bolt_ffi_ffi_wallet_wallet_stop_daemon(self.handle)
         return try await boltffiAsyncCall(
@@ -7394,6 +7398,65 @@ public final class Wallet {
             free: boltffi_async_method_class_bark_bolt_ffi_ffi_wallet_wallet_stop_daemon_wait_free
         ) { boltffiFuture, boltffiStatus in
             let boltffiError = boltffi_async_method_class_bark_bolt_ffi_ffi_wallet_wallet_stop_daemon_wait_complete(boltffiFuture, boltffiStatus)
+            if boltffiError.ptr != nil || Int(boltffiError.len) != 0 {
+                defer { boltffi_free_buf(boltffiError) }
+                throw boltffiDecodeOwnedBuf(boltffiError.ptr, Int(boltffiError.len)) { boltffiErrorReader in BarkError.decode(from: &boltffiErrorReader) }
+            }
+            let boltffiStatusCode = boltffiStatus!.pointee.code
+            guard boltffiStatusCode == 0 else {
+                throw FfiError(message: "FFI failed in async completion with code \(boltffiStatusCode)")
+            }
+        }
+    }
+
+    /// Process the Ark server mailbox as messages arrive, for a wallet opened
+    /// with `run_daemon: false`.
+    ///
+    /// Incoming arkoor payments are added to the wallet, and their receive
+    /// movement reaches `notifications()`, without waiting for `sync()`. For
+    /// each new mailbox message the processor runs Bark's `sync_mailbox`, the
+    /// mailbox step of `sync()`, which also claims Lightning receives the
+    /// server announces, finishes Lightning sends and completes this wallet's
+    /// own delegated round participations. It never joins a round. It reconnects
+    /// on its own and keeps running until `stop_mailbox_processor`, or until
+    /// the wallet is closed or dropped.
+    ///
+    /// Safe to run next to `sync()`, maintenance and payment calls. Calling it
+    /// again while it runs does nothing, and so does calling it while Bark's
+    /// daemon runs, because the daemon already processes the mailbox. Keep
+    /// calling `sync()` for everything else it does.
+    public func startMailboxProcessor() async throws {
+        let boltffiFuture = boltffi_method_class_bark_bolt_ffi_ffi_wallet_wallet_start_mailbox_processor(self.handle)
+        return try await boltffiAsyncCall(
+            futureHandle: boltffiFuture,
+            poll: boltffi_async_method_class_bark_bolt_ffi_ffi_wallet_wallet_start_mailbox_processor_poll,
+            cancel: boltffi_async_method_class_bark_bolt_ffi_ffi_wallet_wallet_start_mailbox_processor_cancel,
+            free: boltffi_async_method_class_bark_bolt_ffi_ffi_wallet_wallet_start_mailbox_processor_free
+        ) { boltffiFuture, boltffiStatus in
+            let boltffiError = boltffi_async_method_class_bark_bolt_ffi_ffi_wallet_wallet_start_mailbox_processor_complete(boltffiFuture, boltffiStatus)
+            if boltffiError.ptr != nil || Int(boltffiError.len) != 0 {
+                defer { boltffi_free_buf(boltffiError) }
+                throw boltffiDecodeOwnedBuf(boltffiError.ptr, Int(boltffiError.len)) { boltffiErrorReader in BarkError.decode(from: &boltffiErrorReader) }
+            }
+            let boltffiStatusCode = boltffiStatus!.pointee.code
+            guard boltffiStatusCode == 0 else {
+                throw FfiError(message: "FFI failed in async completion with code \(boltffiStatusCode)")
+            }
+        }
+    }
+
+    /// Stop the mailbox processor and wait until it has stopped. Connecting
+    /// and waiting are interrupted; a mailbox sync in progress finishes first.
+    /// No-op when it is not running.
+    public func stopMailboxProcessor() async throws {
+        let boltffiFuture = boltffi_method_class_bark_bolt_ffi_ffi_wallet_wallet_stop_mailbox_processor(self.handle)
+        return try await boltffiAsyncCall(
+            futureHandle: boltffiFuture,
+            poll: boltffi_async_method_class_bark_bolt_ffi_ffi_wallet_wallet_stop_mailbox_processor_poll,
+            cancel: boltffi_async_method_class_bark_bolt_ffi_ffi_wallet_wallet_stop_mailbox_processor_cancel,
+            free: boltffi_async_method_class_bark_bolt_ffi_ffi_wallet_wallet_stop_mailbox_processor_free
+        ) { boltffiFuture, boltffiStatus in
+            let boltffiError = boltffi_async_method_class_bark_bolt_ffi_ffi_wallet_wallet_stop_mailbox_processor_complete(boltffiFuture, boltffiStatus)
             if boltffiError.ptr != nil || Int(boltffiError.len) != 0 {
                 defer { boltffi_free_buf(boltffiError) }
                 throw boltffiDecodeOwnedBuf(boltffiError.ptr, Int(boltffiError.len)) { boltffiErrorReader in BarkError.decode(from: &boltffiErrorReader) }

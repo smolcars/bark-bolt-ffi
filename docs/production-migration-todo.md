@@ -103,9 +103,12 @@ checkpoint make it safe next to `sync()`. New API, so a minor release.
 - [x] Concurrent stop/start and daemon start/stop are serialized; stop and close interrupt a stalled connection.
 - [x] Live RegTest Rust test: arkoor receive notified without `sync()`, stopped processor leaves the payment waiting, restart resumes, receives recorded once next to `sync()`.
 - [x] Live Swift and Kotlin contract tests.
-- [ ] PR CI and review.
-- [ ] Main CI full matrix.
-- [ ] Stage CI artifacts and move install docs.
+- [x] PR CI and review ([#10](https://github.com/smolcars/bark-bolt-ffi/pull/10); three GPT-6.1 Sol rounds, approved).
+- [ ] Main CI full matrix ([run 41887941694](https://github.com/smolcars/bark-bolt-ffi/actions/runs/41887941694)):
+  `rust` and `apple` passed; `android` built, checked and uploaded the SDKs,
+  then failed twice on the flaky `live_prepared_board_never_spends_excluded_outpoints`,
+  so its emulator step didn't run. Released from these binaries by decision.
+- [x] Stage CI artifacts and move install docs to 0.8.0.
 - [ ] Publish v0.8.0.
 
 [Execution evidence](validation/mailbox-processor-2026-11-04.md).
