@@ -544,9 +544,14 @@ fn live_prepared_board_never_spends_excluded_outpoints() {
         let amount = OnchainSendAmount::Amount {
             amount_sats: 50_000,
         };
-        // Largest-first selection is what an unconstrained board would spend.
+        // Only the big coin can cover 100k, so an unconstrained board must spend
+        // it. BDK picks randomly between coins that can each cover the amount,
+        // so a 50k board here spends either coin.
+        let too_much = OnchainSendAmount::Amount {
+            amount_sats: 100_000,
+        };
         let unconstrained = wallet
-            .prepare_board(amount.clone(), 1, true, None)
+            .prepare_board(too_much.clone(), 1, true, None)
             .await
             .unwrap();
         assert!(
@@ -581,9 +586,6 @@ fn live_prepared_board_never_spends_excluded_outpoints() {
             .unwrap();
         assert_eq!(drained.inputs, vec![small]);
         wallet.discard_prepared_board(drained.id).await.unwrap();
-        let too_much = OnchainSendAmount::Amount {
-            amount_sats: 100_000,
-        };
         assert_eq!(
             wallet
                 .prepare_board(too_much, 1, true, Some(ignored))
