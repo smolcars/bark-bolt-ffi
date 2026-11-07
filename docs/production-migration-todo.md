@@ -79,6 +79,32 @@ different claims. Record them separately; do not mark one from evidence of anoth
 
 ## Tasks
 
+### 31 — Check VTXOs with the server after a restore (v0.10.0)
+
+Plan: Noah restores wallets from encrypted backups of the Bark database. A
+backup older than the wallet can still list VTXOs as spendable that were spent
+later, and Bark's sync never asks the server about VTXOs it thinks are
+spendable. Bark's `Wallet::trust_and_adopt_server_vtxo_status` (lib-0.8.0,
+`bark/src/vtxo/mod.rs`) asks the server for one VTXO's spend state and marks it
+spent if the server says so; a locked VTXO returns `None` without a request.
+`src/core/wallet.rs` parses the id like `recover_vtxos` and calls it;
+`src/ffi/wallet.rs` exports it through the existing async wrapper. `src/types.rs`
+adds `ServerStatusAdoption` (`Spendable`, `Spent`, `InFlight { state }`) and
+`VtxoInFlightState` (`Unclaimed`, `Unregistered`, `HtlcRecvUnclaimed`); the
+conversion matches Bark's `VtxoSpendState` exhaustively, so `bark-server-rpc`
+(already in the lockfile, same revision) becomes a direct dependency. Bark's
+behaviour is unchanged. New API, so a minor release.
+
+- [x] Unit test: every upstream adoption converts, in-flight states kept; non-in-flight states inside `InFlight` are errors.
+- [x] Live RegTest Rust test: a VTXO spent after a `createSnapshot` backup is spendable in the restored wallet after `sync()`, and `Spent` then marks it spent and lowers the spendable balance by its amount. Also: `Spendable` for an unspent VTXO, `Spent` stays spent, `None` for a locked VTXO (still locked), errors for another wallet's VTXO and an invalid id.
+- [ ] Live Swift and Kotlin contract tests.
+- [ ] Review.
+- [ ] Main CI full matrix.
+- [ ] Stage CI artifacts and move install docs to 0.10.0.
+- [ ] Publish v0.10.0.
+
+[Execution evidence](validation/trust-and-adopt-2026-11-07.md).
+
 ### 30 — Next unused addresses (v0.9.0)
 
 Plan: Noah called `newAddress()` on both wallets on every Receive visit, and

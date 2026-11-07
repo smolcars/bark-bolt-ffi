@@ -260,6 +260,19 @@ extension ContractTests {
             let received = incomingHistory.flatMap(\.receivedOnAddresses).filter { $0.paymentMethod.value == receiveAddress }
             XCTAssertEqual(received.reduce(UInt64(0)) { $0 + $1.amountSats }, 10000)
             XCTAssertTrue(received.allSatisfy { !$0.paymentMethod.methodType.isEmpty })
+            let receivedVtxos = try await recipient.spendableVtxos()
+            let receivedId = try XCTUnwrap(receivedVtxos.first).id
+            let spendable = try await recipient.trustAndAdoptServerVtxoStatus(vtxoId: receivedId)
+            XCTAssertEqual(spendable, .spendable)
+            try await recipient.lockVtxos(vtxoIds: [receivedId], holder: nil)
+            let locked = try await recipient.trustAndAdoptServerVtxoStatus(vtxoId: receivedId)
+            XCTAssertNil(locked)
+            try await recipient.unlockVtxos(vtxoIds: [receivedId], expectedHolder: nil)
+            let boardVtxo = try XCTUnwrap(board.vtxoIds.first)
+            let spent = try await wallet.trustAndAdoptServerVtxoStatus(vtxoId: boardVtxo)
+            XCTAssertEqual(spent, .spent)
+            do { _ = try await recipient.trustAndAdoptServerVtxoStatus(vtxoId: boardVtxo); XCTFail("Expected foreign VTXO error") } catch is BarkError {}
+            do { _ = try await recipient.trustAndAdoptServerVtxoStatus(vtxoId: "invalid"); XCTFail("Expected invalid id") } catch is BarkError {}
         }
         let arkAddress = try await wallet.newAddressWithIndex()
         let parsed = try parseArkAddress(address: arkAddress.address)

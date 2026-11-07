@@ -776,6 +776,30 @@ impl Wallet {
             .await
     }
 
+    /// Ask the server whether this VTXO is spent and adopt its answer, only
+    /// ever toward spent. After restoring an older backup, the wallet can list
+    /// VTXOs as spendable that were spent later, and `sync()` never asks the
+    /// server about those; call this for each spendable one.
+    ///
+    /// - `Spent`: the wallet now has the VTXO as spent. No movement is added.
+    /// - `Spendable`: nothing changes. A VTXO already spent here stays spent.
+    /// - `InFlight`: the server is waiting on a preimage or on the VTXO's
+    ///   transaction chain; nothing changes.
+    /// - None: the VTXO is locked, so it wasn't checked and the server wasn't
+    ///   asked. Unlock it first to check it.
+    ///
+    /// Errors for an invalid id, a VTXO not in this wallet or without a key
+    /// here, an unreachable server, or a server answer with no usable state.
+    /// The server is trusted: a dishonest one can make the wallet stop using
+    /// a VTXO it still owns.
+    pub async fn trust_and_adopt_server_vtxo_status(
+        &self,
+        vtxo_id: String,
+    ) -> Result<Option<types::ServerStatusAdoption>, BarkError> {
+        self.run(|core| async move { core.trust_and_adopt_server_vtxo_status(vtxo_id).await })
+            .await
+    }
+
     /// Outcome of the seed-recovery scan that ran during `Wallet::open`.
     ///
     /// Recovery only runs on the open that creates the wallet locally, and not

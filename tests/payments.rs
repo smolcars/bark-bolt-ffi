@@ -1,7 +1,8 @@
 use bark_bolt_ffi::wallet::WalletOpenArgs;
 use bark_bolt_ffi::{
-    generate_mnemonic, BarkErrorCode, Bip321UriOptions, Config, LightningSendOptions,
-    LightningSendStatus, Network, OnchainWallet, PaymentMethodParsingError, PaymentResult, Wallet,
+    generate_mnemonic, BarkError, BarkErrorCode, Bip321UriOptions, Config, LightningSendOptions,
+    LightningSendStatus, Network, OnchainWallet, PaymentMethodParsingError, PaymentResult,
+    ServerStatusAdoption, VtxoState, Wallet,
 };
 
 fn regtest(args: &[&str]) -> String {
@@ -368,5 +369,116 @@ fn live_next_unused_addresses() {
         assert_eq!((&next.address, next.index), (&again.address, again.index));
         // new_address still always derives.
         assert_ne!(recipient.new_address().await.unwrap(), next.address);
+    });
+}
+
+async fn adopt(wallet: &Wallet, id: &str) -> Result<Option<ServerStatusAdoption>, BarkError> {
+    wallet.trust_and_adopt_server_vtxo_status(id.into()).await
+}
+
+async fn state(wallet: &Wallet, id: &str) -> VtxoState {
+    wallet.get_vtxo_by_id(id.into()).await.unwrap().state
+}
+
+#[test]
+fn live_trust_and_adopt_server_vtxo_status() {
+    if std::env::var("BARK_REGTEST").as_deref() != Ok("1") {
+        return;
+    }
+    tokio::runtime::Runtime::new().unwrap().block_on(async {
+        let directory = tempfile::tempdir().unwrap();
+        let mnemonic = generate_mnemonic().unwrap();
+        let datadir = directory.path().join("sender");
+        let onchain = OnchainWallet::default(
+            Network::Regtest,
+            mnemonic.clone(),
+            config(),
+            datadir.to_str().unwrap().into(),
+        )
+        .await
+        .unwrap();
+        let sender = Wallet::open_with_onchain(
+            Network::Regtest,
+            mnemonic,
+            config(),
+            args(&datadir),
+            &onchain,
+        )
+        .await
+        .unwrap();
+        regtest(&["send-to", &onchain.new_address().await.unwrap(), "0.01"]);
+        onchain.sync().await.unwrap();
+        sender.board_amount(300_000).await.unwrap();
+        regtest(&["generate", "6"]);
+        sender.sync().await.unwrap();
+
+        let seed = generate_mnemonic().unwrap();
+        let recipient = Wallet::open(
+            Network::Regtest,
+            seed.clone(),
+            config(),
+            args(&directory.path().join("recipient")),
+        )
+        .await
+        .unwrap();
+        let address = recipient.new_address().await.unwrap();
+        sender.send_arkoor_payment(address, 20_000).await.unwrap();
+        recipient.sync().await.unwrap();
+        let [received] = &recipient.spendable_vtxos().await.unwrap()[..] else {
+            panic!("expected one received VTXO");
+        };
+        let id = received.id.clone();
+        assert_eq!(
+            adopt(&recipient, &id).await.unwrap(),
+            Some(ServerStatusAdoption::Spendable)
+        );
+        assert_eq!(state(&recipient, &id).await, VtxoState::Spendable);
+
+        // Back up, then spend the VTXO after the backup.
+        let restored_dir = directory.path().join("restored");
+        std::fs::create_dir(&restored_dir).unwrap();
+        recipient
+            .create_snapshot(restored_dir.join("db.sqlite").to_str().unwrap().into())
+            .await
+            .unwrap();
+        let address = sender.new_address().await.unwrap();
+        recipient.send_arkoor_payment(address, 5_000).await.unwrap();
+        assert_eq!(state(&recipient, &id).await, VtxoState::Spent);
+        // Spent here and on the server: stays spent.
+        assert_eq!(
+            adopt(&recipient, &id).await.unwrap(),
+            Some(ServerStatusAdoption::Spent)
+        );
+        assert_eq!(state(&recipient, &id).await, VtxoState::Spent);
+        drop(recipient);
+
+        // The restored backup still has it spendable, and sync doesn't ask the server.
+        let restored = Wallet::open(Network::Regtest, seed, config(), args(&restored_dir))
+            .await
+            .unwrap();
+        restored.sync().await.unwrap();
+        assert_eq!(state(&restored, &id).await, VtxoState::Spendable);
+        let before = restored.balance().await.unwrap().spendable_sats;
+        assert_eq!(
+            adopt(&restored, &id).await.unwrap(),
+            Some(ServerStatusAdoption::Spent)
+        );
+        assert_eq!(state(&restored, &id).await, VtxoState::Spent);
+        let after = restored.balance().await.unwrap().spendable_sats;
+        assert_eq!(before - after, 20_000);
+
+        // A locked VTXO is left alone: None, still locked.
+        let own = sender.spendable_vtxos().await.unwrap()[0].id.clone();
+        sender.lock_vtxos(vec![own.clone()], None).await.unwrap();
+        assert_eq!(adopt(&sender, &own).await.unwrap(), None);
+        assert!(matches!(
+            state(&sender, &own).await,
+            VtxoState::Locked { .. }
+        ));
+        sender.unlock_vtxos(vec![own.clone()], None).await.unwrap();
+
+        // Another wallet's VTXO and an invalid id are errors.
+        assert!(adopt(&restored, &own).await.is_err());
+        assert!(adopt(&restored, "not a vtxo").await.is_err());
     });
 }

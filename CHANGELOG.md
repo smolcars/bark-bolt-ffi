@@ -6,6 +6,42 @@ Names use the Rust spelling: Swift lowercases the first letter
 SCREAMING_SNAKE enum constants (`BarkErrorCode.EXIT_NON_STANDARD_VTXO`) and
 class names for variants (`BroadcastOutcome.Uncertain`).
 
+## 0.10.0
+
+Bark stays at lib-0.8.0 (`959a489f`). Adds one `Wallet` method and two enums;
+existing calls, the ABI of existing types and databases are unchanged.
+
+### Checking VTXOs with the server after a restore
+
+A restored backup can be older than the wallet's real state. It can still list
+VTXOs as spendable that were spent after the backup was taken, and `sync()`
+never asks the server about VTXOs the wallet thinks are spendable.
+
+- `Wallet::trust_and_adopt_server_vtxo_status(vtxo_id) -> Option<ServerStatusAdoption>`
+  exposes Bark's method of the same name. It asks the server for the VTXO's
+  spend state and moves the wallet's VTXO along, only ever toward spent:
+  - `Spent`: the wallet now has the VTXO as spent.
+  - `Spendable`: nothing changes. A VTXO the wallet already has as spent stays
+    spent.
+  - `InFlight { state }`: the server is waiting on a preimage or on the VTXO's
+    transaction chain. `VtxoInFlightState` is `Unclaimed`, `Unregistered` or
+    `HtlcRecvUnclaimed`. Nothing changes.
+  - `None`: the VTXO is locked. It isn't checked and the server isn't asked;
+    unlock it first to check it.
+
+  It errors for an invalid id, a VTXO that isn't in this wallet or has no key
+  here, an unreachable server, or a server answer with no usable state.
+
+Limits:
+
+- It trusts the server. A dishonest server can make the wallet stop using a
+  VTXO it still owns.
+- Marking a VTXO spent adds no movement, so history doesn't show the spend.
+  Balance does.
+- Bark doesn't move an exited VTXO to spent, so a `Spent` answer for one is an
+  error.
+- One server request per VTXO. It doesn't add VTXOs the backup is missing.
+
 ## 0.9.0
 
 Bark stays at lib-0.8.0 (`959a489f`). Adds one `Wallet` and one `OnchainWallet`

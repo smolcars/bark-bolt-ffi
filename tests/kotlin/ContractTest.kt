@@ -242,6 +242,14 @@ class NoahP1ContractTest {
                         val received = recipient.history().flatMap { it.receivedOnAddresses }.filter { it.paymentMethod.value == receiveAddress }
                         assertEquals(10000uL,received.sumOf { it.amountSats })
                         assertTrue(received.all { it.paymentMethod.methodType.isNotEmpty() })
+                        val receivedId = recipient.spendableVtxos().first().id
+                        assertEquals(ServerStatusAdoption.Spendable,recipient.trustAndAdoptServerVtxoStatus(receivedId))
+                        recipient.lockVtxos(listOf(receivedId),null)
+                        assertNull(recipient.trustAndAdoptServerVtxoStatus(receivedId))
+                        recipient.unlockVtxos(listOf(receivedId),null)
+                        assertEquals(ServerStatusAdoption.Spent,wallet.trustAndAdoptServerVtxoStatus(board.vtxoIds.first()))
+                        assertFailsWith<BarkError> { recipient.trustAndAdoptServerVtxoStatus(board.vtxoIds.first()) }
+                        assertFailsWith<BarkError> { recipient.trustAndAdoptServerVtxoStatus("invalid") }
                     }
                     val arkAddress = wallet.newAddressWithIndex()
                     val parsed = parseArkAddress(arkAddress.address)

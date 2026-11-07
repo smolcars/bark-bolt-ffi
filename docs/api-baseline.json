@@ -395,6 +395,13 @@
     },
     {
       "owner": "Wallet",
+      "name": "trust_and_adopt_server_vtxo_status",
+      "async": true,
+      "signature": "pub async fn trust_and_adopt_server_vtxo_status( &self, vtxo_id: String, ) -> Result<Option<types::ServerStatusAdoption>, BarkError>",
+      "source": "src/ffi/wallet.rs"
+    },
+    {
+      "owner": "Wallet",
       "name": "recovery_status",
       "async": false,
       "signature": "pub fn recovery_status(&self) -> types::RecoveryStatus",
@@ -1628,6 +1635,14 @@
     },
     {
       "name": "PaymentResult",
+      "source": "src/types.rs"
+    },
+    {
+      "name": "ServerStatusAdoption",
+      "source": "src/types.rs"
+    },
+    {
+      "name": "VtxoInFlightState",
       "source": "src/types.rs"
     }
   ],

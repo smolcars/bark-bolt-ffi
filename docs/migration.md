@@ -31,7 +31,7 @@ BOLTFFI="$PWD/target/tools/boltffi" scripts/build-sdk.sh android --release
 ./gradlew :sdk:android:publishToMavenLocal :sdk:jvm:publishToMavenLocal
 ```
 
-Use `mavenLocal()` with `io.github.niteshbalusu11:bark-bolt-ffi-android:0.9.0`,
+Use `mavenLocal()` with `io.github.niteshbalusu11:bark-bolt-ffi-android:0.10.0`,
 or the host-specific `bark-bolt-ffi-jvm-darwin-arm64` / `bark-bolt-ffi-jvm-linux-x86_64`
 artifact. Import `io.github.niteshbalusu11.bark.*`. The Maven POM supplies the
 coroutines dependency. The Android AAR embeds all three JNI ABIs and consumer
@@ -497,6 +497,31 @@ New and changed behaviour:
 - Confirmed-only board and send preparations re-check that their parents are
   still confirmed on first submit, and throw `preparedInputsUnavailable` after a
   reorg (or an error when the chain source is unreachable).
+
+## Checking VTXOs after a restore (v0.10.0)
+
+A restored backup can list VTXOs as spendable that were spent after it was
+taken, and `sync()` doesn't ask the server about those. After restoring, call
+`trustAndAdoptServerVtxoStatus` once for each spendable VTXO. A VTXO the server
+reports spent is then marked spent; nothing else changes the wallet. It returns
+nil (Swift) or null (Kotlin) for a locked VTXO, which isn't checked.
+
+```swift
+for vtxo in try await wallet.spendableVtxos() {
+    // .spent: now spent here. .spendable, .inFlight(state:) or nil (locked): unchanged.
+    let status = try await wallet.trustAndAdoptServerVtxoStatus(vtxoId: vtxo.id)
+}
+```
+
+```kotlin
+for (vtxo in wallet.spendableVtxos()) {
+    // Spent: now spent here. Spendable, InFlight(state) or null (locked): unchanged.
+    val status = wallet.trustAndAdoptServerVtxoStatus(vtxo.id)
+}
+```
+
+It trusts the server, and the spend adds no history entry. See
+[CHANGELOG.md](../CHANGELOG.md#0100) for details.
 
 ## Next unused addresses (v0.9.0)
 

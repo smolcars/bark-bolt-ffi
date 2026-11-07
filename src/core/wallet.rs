@@ -1286,6 +1286,18 @@ impl Wallet {
         Ok((&report).into())
     }
 
+    /// Ask the server for the spend state of `vtxo_id` and move the wallet's
+    /// VTXO toward it, only ever toward spent. A locked VTXO is left alone and
+    /// the server isn't asked: `None`. Trusts the server's answer.
+    pub async fn trust_and_adopt_server_vtxo_status(
+        &self,
+        vtxo_id: String,
+    ) -> Result<Option<types::ServerStatusAdoption>, BarkError> {
+        let id = vtxo_id.parse::<VtxoId>().context("invalid vtxo id")?;
+        let adoption = self.inner.trust_and_adopt_server_vtxo_status(id).await?;
+        Ok(adoption.map(TryInto::try_into).transpose()?)
+    }
+
     // ------------------------------------------------------------------------
     // Info
     // ------------------------------------------------------------------------

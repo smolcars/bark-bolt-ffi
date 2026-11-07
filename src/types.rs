@@ -285,6 +285,65 @@ impl From<BarkWalletVtxo> for Vtxo {
     }
 }
 
+/// The server's state for a VTXO that is neither spendable nor spent.
+///
+/// The in-flight subset of the server's `VtxoSpendState`, as carried by
+/// `bark::vtxo::ServerStatusAdoption::InFlight`.
+#[derive(Clone, Copy, Debug, Serialize, Deserialize, PartialEq, Eq)]
+#[serde(rename_all = "kebab-case")]
+#[boltffi::data]
+pub enum VtxoInFlightState {
+    /// From a round whose unlock preimage the server hasn't released yet.
+    Unclaimed,
+    /// Its signed transaction chain hasn't been uploaded to the server yet.
+    Unregistered,
+    /// A Lightning receive HTLC whose preimage hasn't been revealed yet.
+    HtlcRecvUnclaimed,
+}
+
+/// What the server said about a VTXO in
+/// [`Wallet::trust_and_adopt_server_vtxo_status`](crate::core::Wallet::trust_and_adopt_server_vtxo_status).
+///
+/// Mirrors `bark::vtxo::ServerStatusAdoption`. Only `Spent` changes the wallet.
+#[derive(Clone, Debug, Serialize, Deserialize, PartialEq, Eq)]
+#[serde(tag = "type", rename_all = "kebab-case")]
+#[boltffi::data]
+pub enum ServerStatusAdoption {
+    /// The server will let this wallet spend the VTXO. Nothing changed; a VTXO
+    /// the wallet already had as spent stays spent.
+    Spendable,
+    /// The server considers the VTXO spent. The wallet now has it as spent.
+    Spent,
+    /// Neither spendable nor spent: the server is waiting on a preimage or on
+    /// the VTXO's transaction chain. Nothing changed; finishing that flow
+    /// decides where the VTXO belongs.
+    InFlight { state: VtxoInFlightState },
+}
+
+impl TryFrom<bark::vtxo::ServerStatusAdoption> for ServerStatusAdoption {
+    type Error = anyhow::Error;
+
+    fn try_from(adoption: bark::vtxo::ServerStatusAdoption) -> anyhow::Result<Self> {
+        use bark::vtxo::ServerStatusAdoption as A;
+        use server_rpc::protos::VtxoSpendState as S;
+        Ok(match adoption {
+            A::Spendable => Self::Spendable,
+            A::Spent => Self::Spent,
+            A::InFlight(state) => Self::InFlight {
+                state: match state {
+                    S::Unclaimed => VtxoInFlightState::Unclaimed,
+                    S::Unregistered => VtxoInFlightState::Unregistered,
+                    S::HtlcRecvUnclaimed => VtxoInFlightState::HtlcRecvUnclaimed,
+                    // Bark never builds these; matched so a new state fails to compile.
+                    S::Unspecified | S::Spendable | S::Spent => {
+                        anyhow::bail!("server spend state {state:?} is not in flight")
+                    }
+                },
+            },
+        })
+    }
+}
+
 // ============================================================================
 // LightningInvoice
 // ============================================================================
@@ -2879,6 +2938,33 @@ mod noah_parity_tests {
             base64::engine::general_purpose::STANDARD.encode(hex::decode(hex.trim()).unwrap());
         assert_eq!(crate::decode_vtxo(base64).unwrap().id, decoded.id);
         assert!(crate::decode_vtxo("not a VTXO".into()).is_err());
+    }
+}
+
+#[cfg(test)]
+mod server_status_tests {
+    use super::{ServerStatusAdoption, VtxoInFlightState};
+    use bark::vtxo::ServerStatusAdoption as A;
+    use server_rpc::protos::VtxoSpendState as S;
+
+    #[test]
+    fn every_adoption_keeps_its_outcome_and_in_flight_state() {
+        let convert = |a: A| ServerStatusAdoption::try_from(a).unwrap();
+        assert_eq!(convert(A::Spendable), ServerStatusAdoption::Spendable);
+        assert_eq!(convert(A::Spent), ServerStatusAdoption::Spent);
+        for (server, state) in [
+            (S::Unclaimed, VtxoInFlightState::Unclaimed),
+            (S::Unregistered, VtxoInFlightState::Unregistered),
+            (S::HtlcRecvUnclaimed, VtxoInFlightState::HtlcRecvUnclaimed),
+        ] {
+            assert_eq!(
+                convert(A::from_spend_state(server).unwrap()),
+                ServerStatusAdoption::InFlight { state }
+            );
+        }
+        for server in [S::Unspecified, S::Spendable, S::Spent] {
+            assert!(ServerStatusAdoption::try_from(A::InFlight(server)).is_err());
+        }
     }
 }
 
