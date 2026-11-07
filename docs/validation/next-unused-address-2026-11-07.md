@@ -29,6 +29,20 @@ GPT-6.1 Sol (high), two rounds. Round 1 found S1 (P2: a retry after a failed
 save returned an unsaved reveal) and S2 (P3: checklist claimed unrun Swift/Kotlin
 tests). Both fixed in `1eb774d`; round 2 approved with no new findings.
 
+## Hosted CI
+
+Pushed to `main` as `9cb803e` (no PR, by decision). Main run
+[42381295762](https://github.com/smolcars/bark-bolt-ffi/actions/runs/42381295762):
+`rust`, `apple` (full five-slice Apple build, Swift contracts, iOS app tests) and
+`android` (AAR/JVM build, API parity, JVM and packaged-JAR tests, 16 KB alignment,
+emulator UI and app RegTest) passed.
+
+Apple artifact 13577759118 (sha256 `90624399…a40e`) was staged with
+[v090-stage-ci.py](v090-stage-ci.py); XCFramework sha256
+`2ba7ed45d5fb6db2983dbe0039611c30f9ac9edb8a31e989c44abf998bfa0e35`. The generated
+Swift gains only the two `nextUnusedAddress()` methods. The AAR and JVM JAR come
+from Android artifact 13578358372 (sha256 `ce9bf9f2…8488`).
+
 ## Limits
 
 "Used" is as of the last onchain sync and mailbox sync. The onchain wallet is

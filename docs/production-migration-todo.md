@@ -98,8 +98,8 @@ minor release.
 - [x] Live RegTest Rust test: onchain address advances after a mempool payment on bitcoind; Ark address stable until an arkoor receive is synced.
 - [x] Live Swift and Kotlin contract tests.
 - [x] Review: GPT-6.1 Sol (high), two rounds, approved `1eb774d` (S1 fixed: a reveal left staged by a failed save is now saved on retry).
-- [ ] Main CI full matrix.
-- [ ] Stage CI artifacts and move install docs to 0.9.0.
+- [x] Main CI full matrix ([run 42381295762](https://github.com/smolcars/bark-bolt-ffi/actions/runs/42381295762)): `rust`, `apple` and `android` passed at `9cb803e`.
+- [x] Stage CI artifacts and move install docs to 0.9.0.
 - [ ] Publish v0.9.0.
 
 [Execution evidence](validation/next-unused-address-2026-11-07.md).

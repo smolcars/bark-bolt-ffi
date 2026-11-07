@@ -3677,6 +3677,34 @@ public final class OnchainWallet {
         }
     }
 
+    /// The lowest revealed address no wallet transaction pays; reveals and saves a new
+    /// one only when all are used. Repeated calls return the same address without writing.
+    ///
+    /// "Used" is as of the last sync, unconfirmed payments included. The wallet sends its
+    /// change to this same address, so a send can use it up.
+    public func nextUnusedAddress() async throws -> String {
+        let boltffiFuture = boltffi_method_class_bark_bolt_ffi_ffi_onchain_onchain_wallet_next_unused_address(self.handle)
+        return try await boltffiAsyncCall(
+            futureHandle: boltffiFuture,
+            poll: boltffi_async_method_class_bark_bolt_ffi_ffi_onchain_onchain_wallet_next_unused_address_poll,
+            cancel: boltffi_async_method_class_bark_bolt_ffi_ffi_onchain_onchain_wallet_next_unused_address_cancel,
+            free: boltffi_async_method_class_bark_bolt_ffi_ffi_onchain_onchain_wallet_next_unused_address_free
+        ) { boltffiFuture, boltffiStatus in
+            var boltffiResult: FfiBuf_u8 = FfiBuf_u8()
+            let boltffiError = boltffi_async_method_class_bark_bolt_ffi_ffi_onchain_onchain_wallet_next_unused_address_complete(boltffiFuture, boltffiStatus, &boltffiResult)
+            if boltffiError.ptr != nil || Int(boltffiError.len) != 0 {
+                defer { boltffi_free_buf(boltffiError) }
+                throw boltffiDecodeOwnedBuf(boltffiError.ptr, Int(boltffiError.len)) { boltffiErrorReader in BarkError.decode(from: &boltffiErrorReader) }
+            }
+            let boltffiStatusCode = boltffiStatus!.pointee.code
+            guard boltffiStatusCode == 0 else {
+                throw FfiError(message: "FFI failed in async completion with code \(boltffiStatusCode)")
+            }
+            defer { boltffi_free_buf(boltffiResult) }
+            return boltffiDecodeOwnedBuf(boltffiResult.ptr, Int(boltffiResult.len)) { boltffiReader in boltffiReader.readString() }
+        }
+    }
+
     public func send(address: String, amountSats: UInt64, feeRateSatPerVb: UInt64) async throws -> String {
         let boltffiAddressBytes = boltffiEncode { boltffiAddressWriter in boltffiAddressWriter.writeString(address) }
         let boltffiFuture = boltffiAddressBytes.withUnsafeBufferPointer { boltffiAddressBuffer in
@@ -4340,6 +4368,34 @@ public final class Wallet {
             }
             defer { boltffi_free_buf(boltffiResult) }
             return boltffiDecodeOwnedBuf(boltffiResult.ptr, Int(boltffiResult.len)) { boltffiReader in boltffiReader.readString() }
+        }
+    }
+
+    /// The address of the newest stored key while no movement has received on it,
+    /// otherwise a new address. Repeated calls return the same address without writing.
+    ///
+    /// "Received" is as of the last mailbox sync. Lightning receives, boards and change
+    /// use keys from the same sequence, so the returned key may already serve one of them.
+    public func nextUnusedAddress() async throws -> AddressWithIndex {
+        let boltffiFuture = boltffi_method_class_bark_bolt_ffi_ffi_wallet_wallet_next_unused_address(self.handle)
+        return try await boltffiAsyncCall(
+            futureHandle: boltffiFuture,
+            poll: boltffi_async_method_class_bark_bolt_ffi_ffi_wallet_wallet_next_unused_address_poll,
+            cancel: boltffi_async_method_class_bark_bolt_ffi_ffi_wallet_wallet_next_unused_address_cancel,
+            free: boltffi_async_method_class_bark_bolt_ffi_ffi_wallet_wallet_next_unused_address_free
+        ) { boltffiFuture, boltffiStatus in
+            var boltffiResult: FfiBuf_u8 = FfiBuf_u8()
+            let boltffiError = boltffi_async_method_class_bark_bolt_ffi_ffi_wallet_wallet_next_unused_address_complete(boltffiFuture, boltffiStatus, &boltffiResult)
+            if boltffiError.ptr != nil || Int(boltffiError.len) != 0 {
+                defer { boltffi_free_buf(boltffiError) }
+                throw boltffiDecodeOwnedBuf(boltffiError.ptr, Int(boltffiError.len)) { boltffiErrorReader in BarkError.decode(from: &boltffiErrorReader) }
+            }
+            let boltffiStatusCode = boltffiStatus!.pointee.code
+            guard boltffiStatusCode == 0 else {
+                throw FfiError(message: "FFI failed in async completion with code \(boltffiStatusCode)")
+            }
+            defer { boltffi_free_buf(boltffiResult) }
+            return boltffiDecodeOwnedBuf(boltffiResult.ptr, Int(boltffiResult.len)) { boltffiReader in AddressWithIndex.decode(from: &boltffiReader) }
         }
     }
 
