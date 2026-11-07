@@ -253,6 +253,16 @@ impl Wallet {
             .await
     }
 
+    /// The address of the newest stored key while no movement has received on it,
+    /// otherwise a new address. Repeated calls return the same address without writing.
+    ///
+    /// "Received" is as of the last mailbox sync. Lightning receives, boards and change
+    /// use keys from the same sequence, so the returned key may already serve one of them.
+    pub async fn next_unused_address(&self) -> Result<types::AddressWithIndex, BarkError> {
+        self.run(|core| async move { core.next_unused_address().await })
+            .await
+    }
+
     // ------------------------------------------------------------------------
     // Balance & VTXOs
     // ------------------------------------------------------------------------

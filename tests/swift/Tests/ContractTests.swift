@@ -223,7 +223,9 @@ extension ContractTests {
         let mnemonic = try generateMnemonic()
         let onchain = try await OnchainWallet.default(network: .regtest, mnemonic: mnemonic, config: config, datadir: directory.path)
         let wallet = try await Wallet.openWithOnchain(network: .regtest, mnemonicOrSeed: mnemonic, config: config, args: WalletOpenArgs(runDaemon: false, datadir: directory.path, createWithoutServer: true, skipRecovery: true), onchain: onchain)
-        let address = try await onchain.newAddress()
+        let address = try await onchain.nextUnusedAddress()
+        let unchanged = try await onchain.nextUnusedAddress()
+        XCTAssertEqual(address, unchanged)
         let mine = try await onchain.isMine(address: address)
         XCTAssertTrue(mine)
         let foreign = try await onchain.isMine(address: "1BoatSLRHtKNngkdXEeobR76b53LETtpyT")
@@ -246,9 +248,14 @@ extension ContractTests {
         do { try await wallet.updateHistoryMetadata(movementId: movement.id, patchJson: "[]"); XCTFail("Expected patch validation") } catch is BarkError {}
         do {
             let recipient = try await Wallet.open(network: .regtest, mnemonicOrSeed: generateMnemonic(), config: config, args: WalletOpenArgs(runDaemon: false, datadir: directory.appendingPathComponent("recipient").path, createWithoutServer: true, skipRecovery: true))
-            let receiveAddress = try await recipient.newAddress()
+            let receive = try await recipient.nextUnusedAddress()
+            let repeated = try await recipient.nextUnusedAddress()
+            XCTAssertEqual(repeated.address, receive.address)
+            let receiveAddress = receive.address
             _ = try await wallet.sendArkoorPayment(arkAddress: receiveAddress, amountSats: 10000)
             try await recipient.sync()
+            let next = try await recipient.nextUnusedAddress()
+            XCTAssertNotEqual(next.address, receiveAddress)
             let incomingHistory = try await recipient.history()
             let received = incomingHistory.flatMap(\.receivedOnAddresses).filter { $0.paymentMethod.value == receiveAddress }
             XCTAssertEqual(received.reduce(UInt64(0)) { $0 + $1.amountSats }, 10000)

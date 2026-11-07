@@ -6,6 +6,38 @@ Names use the Rust spelling: Swift lowercases the first letter
 SCREAMING_SNAKE enum constants (`BarkErrorCode.EXIT_NON_STANDARD_VTXO`) and
 class names for variants (`BroadcastOutcome.Uncertain`).
 
+## 0.9.0
+
+Bark stays at lib-0.8.0 (`959a489f`). Adds one `Wallet` and one `OnchainWallet`
+method; existing calls, the ABI of existing types and databases are unchanged.
+
+### Next unused addresses
+
+Showing a receive address no longer has to create one. `new_address()` stays
+as it was and always derives a new address.
+
+- `OnchainWallet::next_unused_address() -> String` returns the lowest revealed
+  address that no wallet transaction pays, unconfirmed ones included. It reveals
+  and saves a new address only when every revealed one has been paid, so syncs
+  stop growing with each Receive visit. A repeated call reads memory only.
+  Callback-backed onchain wallets return an error, like `new_address()`.
+- `Wallet::next_unused_address() -> AddressWithIndex` returns the address of the
+  newest stored VTXO key while no movement has received on it, otherwise a new
+  address. A repeated call does a few indexed reads and no write.
+
+Limits:
+
+- "Used" is as of the last onchain `sync()` and the last mailbox sync. A
+  payment the wallet hasn't seen yet doesn't count, so the same address is
+  shown again until it has.
+- Bark's onchain wallet has a single descriptor, so a send puts its change on
+  the lowest unused address, which is the one this method shows. The funds stay
+  in the wallet; the next call returns a new address.
+- Lightning receives, boards, refreshes and change take keys from the same
+  sequence as Ark addresses. The Ark address can therefore reuse such a key.
+- After restoring an older backup, run `initialScan()` and `sync()` before
+  showing addresses, so payments made after the backup are seen.
+
 ## 0.8.0
 
 Bark stays at lib-0.8.0 (`959a489f`). Adds two `Wallet` methods; existing calls,

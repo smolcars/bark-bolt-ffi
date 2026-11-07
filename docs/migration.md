@@ -31,7 +31,7 @@ BOLTFFI="$PWD/target/tools/boltffi" scripts/build-sdk.sh android --release
 ./gradlew :sdk:android:publishToMavenLocal :sdk:jvm:publishToMavenLocal
 ```
 
-Use `mavenLocal()` with `io.github.niteshbalusu11:bark-bolt-ffi-android:0.8.0`,
+Use `mavenLocal()` with `io.github.niteshbalusu11:bark-bolt-ffi-android:0.9.0`,
 or the host-specific `bark-bolt-ffi-jvm-darwin-arm64` / `bark-bolt-ffi-jvm-linux-x86_64`
 artifact. Import `io.github.niteshbalusu11.bark.*`. The Maven POM supplies the
 coroutines dependency. The Android AAR embeds all three JNI ABIs and consumer
@@ -497,6 +497,28 @@ New and changed behaviour:
 - Confirmed-only board and send preparations re-check that their parents are
   still confirmed on first submit, and throw `preparedInputsUnavailable` after a
   reorg (or an error when the chain source is unreachable).
+
+## Next unused addresses (v0.9.0)
+
+`OnchainWallet.nextUnusedAddress()` and `Wallet.nextUnusedAddress()` return the
+same receive address until the wallet has seen a payment to it. Use them for a
+Receive screen instead of `newAddress()`, which still derives a new address on
+every call. Onchain, every revealed address joins every later sync.
+
+```swift
+let onchainAddress = try await onchain.nextUnusedAddress()
+let ark = try await wallet.nextUnusedAddress()   // ark.address, ark.index
+```
+
+```kotlin
+val onchainAddress = onchain.nextUnusedAddress()
+val ark = wallet.nextUnusedAddress()
+```
+
+"Used" is as of the last `sync()` (onchain) and mailbox sync (Ark). The onchain
+wallet sends change to its lowest unused address, so a send can use up the shown
+address. The Ark key can be one Lightning, boarding or change also used. See
+[CHANGELOG.md](../CHANGELOG.md#090) for details.
 
 ## Live mailbox processor (v0.8.0)
 

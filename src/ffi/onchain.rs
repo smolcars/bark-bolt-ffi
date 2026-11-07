@@ -169,6 +169,23 @@ impl OnchainWallet {
         }
     }
 
+    /// The lowest revealed address no wallet transaction pays; reveals and saves a new
+    /// one only when all are used. Repeated calls return the same address without writing.
+    ///
+    /// "Used" is as of the last sync, unconfirmed payments included. The wallet sends its
+    /// change to this same address, so a send can use it up.
+    pub async fn next_unused_address(&self) -> Result<String, BarkError> {
+        match &self.inner {
+            OnchainWalletInner::Bdk(core) => {
+                let core = core.clone();
+                run_async(async move { core.next_unused_address().await }).await
+            }
+            OnchainWalletInner::Callback(_) => {
+                Err("next_unused_address() not supported for callback wallets".into())
+            }
+        }
+    }
+
     pub async fn send(
         &self,
         address: String,

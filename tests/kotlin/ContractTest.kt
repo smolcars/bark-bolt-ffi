@@ -216,7 +216,8 @@ class NoahP1ContractTest {
         try {
             OnchainWallet.default(Network.REGTEST,mnemonic,config,directory.path).use { onchain ->
                 Wallet.openWithOnchain(Network.REGTEST,mnemonic,config,WalletOpenArgs(runDaemon=false,datadir=directory.path,createWithoutServer=true,skipRecovery=true),onchain).use { wallet ->
-                    val address = onchain.newAddress()
+                    val address = onchain.nextUnusedAddress()
+                    assertEquals(address,onchain.nextUnusedAddress())
                     assertTrue(onchain.isMine(address))
                     assertFalse(onchain.isMine("1BoatSLRHtKNngkdXEeobR76b53LETtpyT"))
                     assertFailsWith<BarkError> { onchain.isMine("invalid") }
@@ -233,9 +234,11 @@ class NoahP1ContractTest {
                     assertFailsWith<BarkError> { wallet.updateHistoryMetadata(movement.id,"[]") }
                     val recipientDirectory = java.io.File(directory,"recipient")
                     Wallet.open(Network.REGTEST,generateMnemonic(),config,WalletOpenArgs(runDaemon=false,datadir=recipientDirectory.path,createWithoutServer=true,skipRecovery=true)).use { recipient ->
-                        val receiveAddress = recipient.newAddress()
+                        val receiveAddress = recipient.nextUnusedAddress().address
+                        assertEquals(receiveAddress,recipient.nextUnusedAddress().address)
                         wallet.sendArkoorPayment(receiveAddress,10000uL)
                         recipient.sync()
+                        assertNotEquals(receiveAddress,recipient.nextUnusedAddress().address)
                         val received = recipient.history().flatMap { it.receivedOnAddresses }.filter { it.paymentMethod.value == receiveAddress }
                         assertEquals(10000uL,received.sumOf { it.amountSats })
                         assertTrue(received.all { it.paymentMethod.methodType.isNotEmpty() })

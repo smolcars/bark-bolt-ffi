@@ -338,6 +338,28 @@ impl Wallet {
         Ok(addr.to_string())
     }
 
+    /// The newest stored key's address while no movement pays or names it, else a new one.
+    /// Lightning, boards and change draw keys from the same sequence, so this can reuse one.
+    pub async fn next_unused_address(&self) -> Result<types::AddressWithIndex, BarkError> {
+        let (_, next) = self.inner.peek_next_keypair().await?;
+        if let Some(index) = next.checked_sub(1) {
+            let address = self.inner.peek_address(index).await?;
+            let method = bark::movement::PaymentMethod::Ark(address.clone());
+            if self
+                .inner
+                .history_by_payment_method(&method)
+                .await?
+                .is_empty()
+            {
+                return Ok(types::AddressWithIndex {
+                    address: address.to_string(),
+                    index,
+                });
+            }
+        }
+        self.new_address_with_index().await
+    }
+
     // ------------------------------------------------------------------------
     // Balance & VTXOs
     // ------------------------------------------------------------------------

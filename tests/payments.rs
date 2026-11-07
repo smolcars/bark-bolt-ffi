@@ -297,3 +297,76 @@ fn live_payment_requests_lightning_options_and_movement_ids() {
         assert!(history.iter().any(|m| m.id == movement_id));
     });
 }
+
+#[test]
+fn live_next_unused_addresses() {
+    if std::env::var("BARK_REGTEST").as_deref() != Ok("1") {
+        return;
+    }
+    tokio::runtime::Runtime::new().unwrap().block_on(async {
+        let directory = tempfile::tempdir().unwrap();
+        let mnemonic = generate_mnemonic().unwrap();
+        let datadir = directory.path().join("sender");
+        let onchain = OnchainWallet::default(
+            Network::Regtest,
+            mnemonic.clone(),
+            config(),
+            datadir.to_str().unwrap().into(),
+        )
+        .await
+        .unwrap();
+        let sender = Wallet::open_with_onchain(
+            Network::Regtest,
+            mnemonic,
+            config(),
+            args(&datadir),
+            &onchain,
+        )
+        .await
+        .unwrap();
+
+        // Onchain: stable until a sync sees a payment, even an unconfirmed one.
+        let first = onchain.next_unused_address().await.unwrap();
+        assert_eq!(first, onchain.next_unused_address().await.unwrap());
+        regtest(&["bcli", "sendtoaddress", &first, "0.01"]);
+        assert_eq!(first, onchain.next_unused_address().await.unwrap());
+        onchain.sync().await.unwrap();
+        let second = onchain.next_unused_address().await.unwrap();
+        assert_ne!(first, second);
+        assert_eq!(second, onchain.next_unused_address().await.unwrap());
+        regtest(&["generate", "1"]);
+        onchain.sync().await.unwrap();
+        sender.board_amount(300_000).await.unwrap();
+        regtest(&["generate", "6"]);
+        sender.sync().await.unwrap();
+
+        // Ark: stable until a received payment is synced.
+        let recipient = Wallet::open(
+            Network::Regtest,
+            generate_mnemonic().unwrap(),
+            config(),
+            args(&directory.path().join("recipient")),
+        )
+        .await
+        .unwrap();
+        let ark = recipient.next_unused_address().await.unwrap();
+        let again = recipient.next_unused_address().await.unwrap();
+        assert_eq!((&ark.address, ark.index), (&again.address, again.index));
+        assert_eq!(
+            recipient.peek_address(ark.index).await.unwrap(),
+            ark.address
+        );
+        sender
+            .send_arkoor_payment(ark.address.clone(), 10_000)
+            .await
+            .unwrap();
+        recipient.sync().await.unwrap();
+        let next = recipient.next_unused_address().await.unwrap();
+        assert_ne!(next.address, ark.address);
+        assert!(next.index > ark.index);
+        let again = recipient.next_unused_address().await.unwrap();
+        assert_eq!((&next.address, next.index), (&again.address, again.index));
+        // new_address still always derives.
+        assert_ne!(recipient.new_address().await.unwrap(), next.address);
+    });
+}

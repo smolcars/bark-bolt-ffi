@@ -79,6 +79,28 @@ different claims. Record them separately; do not mark one from evidence of anoth
 
 ## Tasks
 
+### 30 — Next unused addresses (v0.9.0)
+
+Plan: Noah called `newAddress()` on both wallets on every Receive visit, and
+every revealed onchain address joins every later sync (a mainnet wallet had 53
+revealed addresses for 15 transactions). `src/core/onchain.rs` adds
+`next_unused_address`, BDK's `next_unused_address(External)` under the wallet
+write lock `new_address` takes, saving the changeset only when the reveal index
+moved. `src/core/wallet.rs` adds the Ark version: the newest stored key's
+address (`peek_next_keypair` minus one, then `peek_address`) unless Bark's
+indexed `history_by_payment_method` finds a movement for it, else
+`new_address_with_index`. Kept simple by decision: Ark addresses may reuse a key
+Lightning, boarding or change took, and concurrent first calls may each derive.
+Both are exported unchanged through the existing async wrappers. New API, so a
+minor release.
+
+- [x] Unit test: same address twice with nothing staged, reveal saved, advances after a synced payment, reload agrees, prepared change lands on the shown address.
+- [x] Live RegTest Rust test: onchain address advances after a mempool payment on bitcoind; Ark address stable until an arkoor receive is synced.
+- [x] Live Swift and Kotlin contract tests.
+- [ ] Main CI full matrix.
+- [ ] Stage CI artifacts and move install docs to 0.9.0.
+- [ ] Publish v0.9.0.
+
 ### 29 — Live mailbox processor (v0.8.0)
 
 Plan: `src/ffi/mailbox.rs` keeps Bark's `subscribe_mailbox_messages` stream
@@ -109,7 +131,7 @@ checkpoint make it safe next to `sync()`. New API, so a minor release.
   then failed twice on the flaky `live_prepared_board_never_spends_excluded_outpoints`,
   so its emulator step didn't run. Released from these binaries by decision.
 - [x] Stage CI artifacts and move install docs to 0.8.0.
-- [ ] Publish v0.8.0.
+- [x] Publish v0.8.0.
 
 [Execution evidence](validation/mailbox-processor-2026-11-04.md).
 

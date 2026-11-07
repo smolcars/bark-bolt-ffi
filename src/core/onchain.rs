@@ -463,6 +463,23 @@ impl OnchainWallet {
         Ok(addr.to_string())
     }
 
+    /// The lowest revealed address no transaction in the wallet's graph pays; reveals and
+    /// persists a new one only when every revealed address is used. "Used" is as of the last
+    /// sync: a payment the chain source has not reported yet does not count.
+    pub async fn next_unused_address(&self) -> Result<String, BarkError> {
+        let mut w = self.wallet.write().await;
+        let external = bdk_wallet::KeychainKind::External;
+        let revealed = w.wallet.derivation_index(external);
+        let address = w.wallet.next_unused_address(external).address;
+        if w.wallet.derivation_index(external) != revealed {
+            if let Some(stage) = w.wallet.staged() {
+                w.db.store_bdk_wallet_changeset(stage).await?;
+                w.wallet.take_staged();
+            }
+        }
+        Ok(address.to_string())
+    }
+
     pub async fn send(
         &self,
         address: String,
@@ -766,6 +783,80 @@ mod tests {
                 .unwrap()
                 .unwrap();
             assert_eq!(persisted.balance().confirmed.to_sat(), 50_000);
+        });
+    }
+
+    #[test]
+    fn next_unused_address_waits_for_a_payment() {
+        crate::ffi::runtime::TOKIO_RT.block_on(async {
+            let block = bitcoin::BlockHash::from_byte_array([1; 32]);
+            let esplora = stub_esplora(vec![(1, block)]);
+            esplora.release.send(()).unwrap();
+            let (onchain, db, _directory) = open_wallet(&esplora).await;
+            let external = bdk_wallet::KeychainKind::External;
+            let reload = || async {
+                bark::onchain::bdk_wallet::Wallet::load()
+                    .load_wallet_no_persist(db.initialize_bdk_wallet().await.unwrap())
+                    .unwrap()
+                    .unwrap()
+            };
+
+            let first = onchain.next_unused_address().await.unwrap();
+            assert_eq!(first, onchain.next_unused_address().await.unwrap());
+            assert!(onchain.wallet.read().await.wallet.staged().is_none());
+            assert_eq!(reload().await.derivation_index(external), Some(0));
+
+            let script = parse_address(&first, bitcoin::Network::Regtest)
+                .unwrap()
+                .script_pubkey();
+            serve_payment(&esplora, &script, block);
+            onchain.sync().await.unwrap();
+            let second = onchain.next_unused_address().await.unwrap();
+            assert_ne!(first, second);
+            // Used-ness is rebuilt from the persisted graph; the reveal was persisted.
+            let mut reopened = reload().await;
+            assert_eq!(reopened.derivation_index(external), Some(1));
+            assert_eq!(
+                reopened.next_unused_address(external).address.to_string(),
+                second
+            );
+
+            // Bark's wallet is single-descriptor, so change takes the lowest unused address:
+            // the one just shown for receiving.
+            let secp = bitcoin::secp256k1::Secp256k1::new();
+            let key = bitcoin::secp256k1::Keypair::new(
+                &secp,
+                &mut bitcoin::secp256k1::rand::thread_rng(),
+            );
+            let other = bitcoin::Address::p2tr(
+                &secp,
+                key.x_only_public_key().0,
+                None,
+                bitcoin::KnownHrp::Regtest,
+            )
+            .to_string();
+            let prepared = onchain
+                .prepare_send(
+                    other,
+                    types::OnchainSendAmount::Amount {
+                        amount_sats: 10_000,
+                    },
+                    1,
+                    false,
+                )
+                .await
+                .unwrap();
+            let w = onchain.wallet.read().await;
+            let change = parse_address(&second, bitcoin::Network::Regtest)
+                .unwrap()
+                .script_pubkey();
+            assert!(w.prepared[&prepared.id]
+                .transaction
+                .output
+                .iter()
+                .any(|o| o.script_pubkey == change));
+            drop(w);
+            assert_ne!(onchain.next_unused_address().await.unwrap(), second);
         });
     }
 
