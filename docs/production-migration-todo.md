@@ -97,8 +97,8 @@ behaviour is unchanged. New API, so a minor release.
 
 - [x] Unit test: every upstream adoption converts, in-flight states kept; non-in-flight states inside `InFlight` are errors.
 - [x] Live RegTest Rust test: a VTXO spent after a `createSnapshot` backup is spendable in the restored wallet after `sync()`, and `Spent` then marks it spent and lowers the spendable balance by its amount. Also: `Spendable` for an unspent VTXO, `Spent` stays spent, `None` for a locked VTXO (still locked), errors for another wallet's VTXO and an invalid id.
-- [ ] Live Swift and Kotlin contract tests.
-- [ ] Review.
+- [x] Live Swift and Kotlin contract tests.
+- [x] Review: GPT-6.1 Sol (high), one round, approved `ddb1fcf` (S1, P3: this evidence file was missing).
 - [ ] Main CI full matrix.
 - [ ] Stage CI artifacts and move install docs to 0.10.0.
 - [ ] Publish v0.10.0.
