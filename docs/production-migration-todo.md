@@ -96,10 +96,13 @@ minor release.
 
 - [x] Unit test: same address twice with nothing staged, reveal saved, advances after a synced payment, reload agrees, prepared change lands on the shown address.
 - [x] Live RegTest Rust test: onchain address advances after a mempool payment on bitcoind; Ark address stable until an arkoor receive is synced.
-- [ ] Live Swift and Kotlin contract tests.
+- [x] Live Swift and Kotlin contract tests.
+- [x] Review: GPT-6.1 Sol (high), two rounds, approved `1eb774d` (S1 fixed: a reveal left staged by a failed save is now saved on retry).
 - [ ] Main CI full matrix.
 - [ ] Stage CI artifacts and move install docs to 0.9.0.
 - [ ] Publish v0.9.0.
+
+[Execution evidence](validation/next-unused-address-2026-11-07.md).
 
 ### 29 — Live mailbox processor (v0.8.0)
 
