@@ -468,14 +468,14 @@ impl OnchainWallet {
     /// sync: a payment the chain source has not reported yet does not count.
     pub async fn next_unused_address(&self) -> Result<String, BarkError> {
         let mut w = self.wallet.write().await;
-        let external = bdk_wallet::KeychainKind::External;
-        let revealed = w.wallet.derivation_index(external);
-        let address = w.wallet.next_unused_address(external).address;
-        if w.wallet.derivation_index(external) != revealed {
-            if let Some(stage) = w.wallet.staged() {
-                w.db.store_bdk_wallet_changeset(stage).await?;
-                w.wallet.take_staged();
-            }
+        let address = w
+            .wallet
+            .next_unused_address(bdk_wallet::KeychainKind::External)
+            .address;
+        // Also saves a reveal an earlier failed save left staged.
+        if let Some(stage) = w.wallet.staged() {
+            w.db.store_bdk_wallet_changeset(stage).await?;
+            w.wallet.take_staged();
         }
         Ok(address.to_string())
     }
@@ -801,7 +801,18 @@ mod tests {
                     .unwrap()
             };
 
-            let first = onchain.next_unused_address().await.unwrap();
+            // A reveal whose save failed stays staged; the next call must save it.
+            let first = onchain
+                .wallet
+                .write()
+                .await
+                .wallet
+                .next_unused_address(external)
+                .address
+                .to_string();
+            let saved = db.initialize_bdk_wallet().await.unwrap();
+            assert!(saved.indexer.last_revealed.is_empty());
+            assert_eq!(first, onchain.next_unused_address().await.unwrap());
             assert_eq!(first, onchain.next_unused_address().await.unwrap());
             assert!(onchain.wallet.read().await.wallet.staged().is_none());
             assert_eq!(reload().await.derivation_index(external), Some(0));

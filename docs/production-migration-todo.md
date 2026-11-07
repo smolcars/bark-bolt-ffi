@@ -85,8 +85,8 @@ Plan: Noah called `newAddress()` on both wallets on every Receive visit, and
 every revealed onchain address joins every later sync (a mainnet wallet had 53
 revealed addresses for 15 transactions). `src/core/onchain.rs` adds
 `next_unused_address`, BDK's `next_unused_address(External)` under the wallet
-write lock `new_address` takes, saving the changeset only when the reveal index
-moved. `src/core/wallet.rs` adds the Ark version: the newest stored key's
+write lock `new_address` takes, saving the changeset only when something is staged:
+a new reveal, or one an earlier failed save left. `src/core/wallet.rs` adds the Ark version: the newest stored key's
 address (`peek_next_keypair` minus one, then `peek_address`) unless Bark's
 indexed `history_by_payment_method` finds a movement for it, else
 `new_address_with_index`. Kept simple by decision: Ark addresses may reuse a key
@@ -96,7 +96,7 @@ minor release.
 
 - [x] Unit test: same address twice with nothing staged, reveal saved, advances after a synced payment, reload agrees, prepared change lands on the shown address.
 - [x] Live RegTest Rust test: onchain address advances after a mempool payment on bitcoind; Ark address stable until an arkoor receive is synced.
-- [x] Live Swift and Kotlin contract tests.
+- [ ] Live Swift and Kotlin contract tests.
 - [ ] Main CI full matrix.
 - [ ] Stage CI artifacts and move install docs to 0.9.0.
 - [ ] Publish v0.9.0.
