@@ -2601,6 +2601,69 @@ public enum VtxoState: Hashable, Equatable, Sendable {
     }
 }
 
+/// The server's state for a VTXO that is neither spendable nor spent.
+///
+/// The in-flight subset of the server's `VtxoSpendState`, as carried by
+/// `bark::vtxo::ServerStatusAdoption::InFlight`.
+public enum VtxoInFlightState: Int32, Hashable, Sendable, CaseIterable {
+    /// From a round whose unlock preimage the server hasn't released yet.
+    case unclaimed = 0
+    /// Its signed transaction chain hasn't been uploaded to the server yet.
+    case unregistered = 1
+    /// A Lightning receive HTLC whose preimage hasn't been revealed yet.
+    case htlcRecvUnclaimed = 2
+
+    @usableFromInline init(fromC c: Int32) {
+        self = VtxoInFlightState(rawValue: c)!
+    }
+
+    @usableFromInline var cValue: Int32 {
+        rawValue
+    }
+}
+
+/// What the server said about a VTXO in
+/// [`Wallet::trust_and_adopt_server_vtxo_status`](crate::core::Wallet::trust_and_adopt_server_vtxo_status).
+///
+/// Mirrors `bark::vtxo::ServerStatusAdoption`. Only `Spent` changes the wallet.
+public enum ServerStatusAdoption: Hashable, Equatable, Sendable {
+    /// The server will let this wallet spend the VTXO. Nothing changed; a VTXO
+    /// the wallet already had as spent stays spent.
+    case spendable
+    /// The server considers the VTXO spent. The wallet now has it as spent.
+    case spent
+    /// Neither spendable nor spent: the server is waiting on a preimage or on
+    /// the VTXO's transaction chain. Nothing changed; finishing that flow
+    /// decides where the VTXO belongs.
+    case inFlight(state: VtxoInFlightState)
+
+    @inlinable static func decode(from reader: inout WireReader) -> ServerStatusAdoption {
+        let tag = reader.readU32()
+        switch tag {
+        case 0:
+            return .spendable
+        case 1:
+            return .spent
+        case 2:
+            return .inFlight(state: VtxoInFlightState(rawValue: reader.readI32())!)
+        default:
+            fatalError("Invalid ServerStatusAdoption tag: \(tag)")
+        }
+    }
+
+    @inlinable func encode(to writer: inout WireWriter) {
+        switch self {
+        case .spendable:
+            writer.writeU32(0)
+        case .spent:
+            writer.writeU32(1)
+        case let .inFlight(state):
+            writer.writeU32(2)
+            writer.writeI32(state.rawValue)
+        }
+    }
+}
+
 /// Terminal/in-flight state of an outgoing lightning send.
 ///
 /// Mirrors `bark`'s `LightningSendState`. `pay_lightning_*` and
@@ -5870,6 +5933,48 @@ public final class Wallet {
             }
             defer { boltffi_free_buf(boltffiResult) }
             return boltffiDecodeOwnedBuf(boltffiResult.ptr, Int(boltffiResult.len)) { boltffiReader in RecoveryReport.decode(from: &boltffiReader) }
+        }
+    }
+
+    /// Ask the server whether this VTXO is spent and adopt its answer, only
+    /// ever toward spent. After restoring an older backup, the wallet can list
+    /// VTXOs as spendable that were spent later, and `sync()` never asks the
+    /// server about those; call this for each spendable one.
+    ///
+    /// - `Spent`: the wallet now has the VTXO as spent. No movement is added.
+    /// - `Spendable`: nothing changes. A VTXO already spent here stays spent.
+    /// - `InFlight`: the server is waiting on a preimage or on the VTXO's
+    ///   transaction chain; nothing changes.
+    /// - None: the VTXO is locked, so it wasn't checked and the server wasn't
+    ///   asked. Unlock it first to check it.
+    ///
+    /// Errors for an invalid id, a VTXO not in this wallet or without a key
+    /// here, an unreachable server, or a server answer with no usable state.
+    /// The server is trusted: a dishonest one can make the wallet stop using
+    /// a VTXO it still owns.
+    public func trustAndAdoptServerVtxoStatus(vtxoId: String) async throws -> ServerStatusAdoption? {
+        let boltffiVtxoIdBytes = boltffiEncode { boltffiVtxoIdWriter in boltffiVtxoIdWriter.writeString(vtxoId) }
+        let boltffiFuture = boltffiVtxoIdBytes.withUnsafeBufferPointer { boltffiVtxoIdBuffer in
+            return boltffi_method_class_bark_bolt_ffi_ffi_wallet_wallet_trust_and_adopt_server_vtxo_status(self.handle, boltffiVtxoIdBuffer.baseAddress!, UInt(boltffiVtxoIdBuffer.count))
+        }
+        return try await boltffiAsyncCall(
+            futureHandle: boltffiFuture,
+            poll: boltffi_async_method_class_bark_bolt_ffi_ffi_wallet_wallet_trust_and_adopt_server_vtxo_status_poll,
+            cancel: boltffi_async_method_class_bark_bolt_ffi_ffi_wallet_wallet_trust_and_adopt_server_vtxo_status_cancel,
+            free: boltffi_async_method_class_bark_bolt_ffi_ffi_wallet_wallet_trust_and_adopt_server_vtxo_status_free
+        ) { boltffiFuture, boltffiStatus in
+            var boltffiResult: FfiBuf_u8 = FfiBuf_u8()
+            let boltffiError = boltffi_async_method_class_bark_bolt_ffi_ffi_wallet_wallet_trust_and_adopt_server_vtxo_status_complete(boltffiFuture, boltffiStatus, &boltffiResult)
+            if boltffiError.ptr != nil || Int(boltffiError.len) != 0 {
+                defer { boltffi_free_buf(boltffiError) }
+                throw boltffiDecodeOwnedBuf(boltffiError.ptr, Int(boltffiError.len)) { boltffiErrorReader in BarkError.decode(from: &boltffiErrorReader) }
+            }
+            let boltffiStatusCode = boltffiStatus!.pointee.code
+            guard boltffiStatusCode == 0 else {
+                throw FfiError(message: "FFI failed in async completion with code \(boltffiStatusCode)")
+            }
+            defer { boltffi_free_buf(boltffiResult) }
+            return boltffiDecodeOwnedBuf(boltffiResult.ptr, Int(boltffiResult.len)) { boltffiReader in boltffiReader.readOptional { boltffiReader in ServerStatusAdoption.decode(from: &boltffiReader) } }
         }
     }
 

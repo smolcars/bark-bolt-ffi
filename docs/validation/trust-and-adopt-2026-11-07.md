@@ -39,6 +39,25 @@ was reset.
 GPT-6.1 Sol (high), one round: approved `ddb1fcf` with no P1 or P2. S1 (P3:
 the checklist linked this file before it existed) is fixed by adding it.
 
+## Hosted CI
+
+Pushed to `main` as `a84271e` (no PR, by decision). Main run
+[42398073728](https://github.com/smolcars/bark-bolt-ffi/actions/runs/42398073728):
+`rust`, `apple` (full five-slice Apple build, Swift contracts, iOS app tests) and
+`android` (AAR/JVM build, API parity, JVM and packaged-JAR tests, 16 KB alignment,
+emulator UI and app RegTest) passed. Attempt 1's `android` job failed in
+`just setup-everything`, before any test, because LND was still starting
+(`lncli`: "server is still in the process of starting"); rerunning that job
+passed.
+
+Apple artifact 13584034558 (sha256 `4b5abdd5…f2cc9`) was staged with
+[v0100-stage-ci.py](v0100-stage-ci.py); XCFramework sha256
+`bee0e937a0042957dda06909c97dd2646954c60dd5fcb9f4fc6dfecbdb21d1ac`. The generated
+Swift gains only `VtxoInFlightState`, `ServerStatusAdoption` and
+`trustAndAdoptServerVtxoStatus`. The AAR and JVM JAR come from Android artifact
+13585201850 (sha256 `9e47c76f…4932`) of the passing attempt; their POMs differ
+from v0.9.0's only in version.
+
 ## Limits
 
 - No in-flight state was produced live; the unit test covers their conversion.
