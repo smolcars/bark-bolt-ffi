@@ -101,7 +101,7 @@ behaviour is unchanged. New API, so a minor release.
 - [x] Review: GPT-6.1 Sol (high), one round, approved `ddb1fcf` (S1, P3: this evidence file was missing).
 - [x] Main CI full matrix ([run 42398073728](https://github.com/smolcars/bark-bolt-ffi/actions/runs/42398073728)): `rust`, `apple` and `android` passed at `a84271e`. Attempt 1's `android` failed in `setup-everything` before any test (LND still starting); the rerun passed.
 - [x] Stage CI artifacts and move install docs to 0.10.0.
-- [ ] Publish v0.10.0.
+- [x] Publish [v0.10.0](https://github.com/smolcars/bark-bolt-ffi/releases/tag/v0.10.0) (tag `5cdd35b`); a clean SwiftPM consumer of the tag resolved the released XCFramework and passed the live contracts, and Gradle resolved `bark-bolt-ffi-android:0.10.0@aar` from the release with Noah's repository setup.
 
 [Execution evidence](validation/trust-and-adopt-2026-11-07.md).
 
