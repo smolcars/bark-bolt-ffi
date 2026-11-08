@@ -115,7 +115,7 @@ setup_lightning_channels() {
             wait_for 'LND funding' lnd_funded >/dev/null
             wait_for 'LND chain sync after mining' lnd_at_tip >/dev/null
             if ! lncli listpeers | jq -e --arg peer "$peer" 'any(.peers[]; .pub_key == $peer)' >/dev/null; then
-                lncli connect "$peer@cln:$port" >/dev/null
+                wait_for 'LND peer connection' lncli connect "$peer@cln:$port" >/dev/null
             fi
             lncli openchannel "--node_key=$peer" --local_amt=10000000 --push_amt=5000000 >/dev/null
         fi

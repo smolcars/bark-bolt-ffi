@@ -37,11 +37,19 @@ runner services and wallet containers are not modified by the PR cleanup.
 
 ## Validation and remaining work
 
+- Runtime fix plan: `scripts/ark-dev.sh` must wait for `lncli connect` to succeed;
+  LND can report chain sync before its peer server starts. Reuse the existing
+  bounded wait, add one startup-race regression in `tests/shell/ark-dev.sh`, and
+  rerun real CI. Preserve funding/channel logic and all wallet volumes.
 - Passed: actionlint, ShellCheck, 13 Python tests, Swift release-file integrity.
-- Configured and exercised: immutable runner access and the approval environment.
-  Narrow approval to fork/untrusted PRs so trusted pushes do not repeatedly stop.
-- Real Linux release-matrix build and split [PR #12 CI](https://github.com/smolcars/bark-bolt-ffi/pull/12)
-  are running. The first live check found the upstream CLI's glibc requirement;
-  packaging that build tool in Nix resolved it. Compilation is now in progress.
-- Pending: completed native build, payload portability and live Blacksmith tests.
-  Do not mark runtime acceptance complete from syntax checks or an approval gate.
+- Passed: required approval for untrusted PRs and automatic trusted-PR routing.
+- Passed: manual full ABI build in 37m39s, including portable native libraries and
+  the verified runtime bundle. Its temporary service override was removed and
+  the normal runner listener restored. No further manual build is needed.
+- [CI run 42443649277](https://github.com/smolcars/bark-bolt-ffi/actions/runs/42443649277)
+  passed self-hosted Rust checks, self-hosted Android compilation, and Apple.
+  Blacksmith verified/unpacked the payload, then hit LND's peer-server startup
+  race before acceptance tests. The bounded connection wait now has a regression
+  that reproduces a rejected first connection despite successful chain sync.
+- Pending: real Blacksmith Rust/JVM/emulator/RegTest acceptance after that fix.
+  Mock startup regression checks do not establish live backend acceptance.
