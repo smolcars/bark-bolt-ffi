@@ -35,7 +35,7 @@ isolated by workflow run and clean up only that run's containers/volumes.
 No wallet logic, SDK API, persistence or transaction-validation change. Existing
 runner services and wallet containers are not modified by the PR cleanup.
 
-## Validation and remaining work
+## Validation
 
 - Runtime fix plan: `scripts/ark-dev.sh` must wait for `lncli connect` to succeed;
   LND can report chain sync before its peer server starts. Reuse the existing
@@ -51,5 +51,11 @@ runner services and wallet containers are not modified by the PR cleanup.
   Blacksmith verified/unpacked the payload, then hit LND's peer-server startup
   race before acceptance tests. The bounded connection wait now has a regression
   that reproduces a rejected first connection despite successful chain sync.
-- Pending: real Blacksmith Rust/JVM/emulator/RegTest acceptance after that fix.
-  Mock startup regression checks do not establish live backend acceptance.
+- [CI run 42445168836](https://github.com/smolcars/bark-bolt-ffi/actions/runs/42445168836)
+  passed all four jobs on code commit `a57b3c3`: Rust and Android compilation on
+  the Linux pool, Apple on Blacksmith, and Blacksmith runtime acceptance. The
+  transferred payload passed provenance checks; 116 Rust tests, two Android
+  instrumentation tests, both 16-test JVM runs, and live app RegTest passed.
+- Both normal Linux listeners are active with no validation overrides; the third
+  stays disabled. Physical devices and additional ABI runtime coverage remain
+  outside this migration's acceptance scope.
