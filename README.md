@@ -24,7 +24,9 @@ XCFramework. Kotlin: build the AAR/JVM JAR below, or download [versioned release
 
 Install Rust 1.99.1, protobuf (`protoc`), Just, jq, JDK17 and the Android SDK/NDK28.2.13676358.
 Apple builds need Xcode; the example project uses XcodeGen. Homebrew tools must
-be on PATH. Install the pinned BoltFFI CLI with:
+be on PATH. On x86_64 Linux, `nix develop --no-update-lock-file .#android` supplies
+the pinned Android tools; Debian 12 or Ubuntu 24.04 must also provide `/usr/bin/cc`
+and `/usr/bin/c++` for portable desktop binaries. Install the pinned BoltFFI CLI with:
 
 ```sh
 scripts/install-boltffi.sh
@@ -91,9 +93,13 @@ backend setup/funding/mining/RPC operation goes through the same Bash script.
 
 ## CI
 
-[SDK and native apps](.github/workflows/ci.yml) builds Rust, SwiftPM/XCFramework,
-Android AAR/JVM JAR and both apps on Blacksmith Linux/macOS runners. It executes
-SDK contracts, iOS UI tests and Android UI/RegTest tests.
+[SDK and native apps](.github/workflows/ci.yml) compiles Android AAR/JVM JAR,
+APKs, and acceptance tests on the `linux-blixt-europe` runner pool with pinned Nix
+tools and persistent project caches. PR builds require approval in the
+`android-pr-build` environment before running on that shared host. Blacksmith
+runs the compiled Rust/JVM tests, Android instrumentation, and live app RegTest
+without rebuilding. Rust checks and Apple SDK/app builds remain on Blacksmith.
+See [runner access and operation](docs/devices.md#linux-android-build-runners).
 
 [Full cross-platform acceptance](.github/workflows/integration.yml) is manually
 dispatched on a macOS ARM64 runner with Xcode,

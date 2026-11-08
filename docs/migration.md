@@ -36,8 +36,10 @@ or the host-specific `bark-bolt-ffi-jvm-darwin-arm64` / `bark-bolt-ffi-jvm-linux
 artifact. Import `io.github.niteshbalusu11.bark.*`. The Maven POM supplies the
 coroutines dependency. The Android AAR embeds all three JNI ABIs and consumer
 R8 rules. JVM JARs contain the native library for the build host; choose a JAR
-matching the deployment OS/architecture. Linux CI builds on Ubuntu24.04; rebuild
-locally when targeting an older libc. Maven Central publication is separate.
+matching the deployment OS/architecture. Published v0.10.0 Linux binaries were
+built on Ubuntu 24.04. New Linux CI compilation uses the Debian 12 runner's native
+compiler and verifies that the runtime binaries do not depend on Nix-store paths;
+rebuild locally when targeting an older libc. Maven Central publication is separate.
 The tag build attaches versioned AAR/JAR/POM files to each GitHub release, such as
 [v0.10.0](https://github.com/smolcars/bark-bolt-ffi/releases/tag/v0.10.0);
 verify them against its SHA256SUMS. Releases attach the Linux x86_64 JVM JAR;
