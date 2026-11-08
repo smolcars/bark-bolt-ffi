@@ -1,0 +1,11 @@
+[Unit]
+Description=Resource budget for GitHub Actions runners and Nix builds
+
+[Slice]
+CPUAccounting=true
+MemoryAccounting=true
+CPUWeight=50
+CPUQuota=1200%
+MemoryHigh=28G
+MemoryMax=32G
+MemorySwapMax=0

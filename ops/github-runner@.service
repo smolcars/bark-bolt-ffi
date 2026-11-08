@@ -1,0 +1,42 @@
+[Unit]
+Description=GitHub Actions runner %i
+Wants=network-online.target
+After=network-online.target nix-daemon.socket
+
+[Service]
+Type=simple
+User=gha-%i
+Group=gha-%i
+WorkingDirectory=/var/lib/github-runners/%i/runner
+ExecStart=/var/lib/github-runners/%i/runner/runsvc.sh
+Environment=HOME=/var/lib/github-runners/%i
+Environment=PATH=/nix/var/nix/profiles/default/bin:/usr/local/bin:/usr/bin:/bin
+Environment=CARGO_BUILD_JOBS=6
+Environment=GRADLE_OPTS=-Dorg.gradle.workers.max=6
+Environment=DOTNET_CLI_TELEMETRY_OPTOUT=1
+Slice=ci-runners.slice
+CPUQuota=600%
+MemoryHigh=12G
+MemoryMax=16G
+MemorySwapMax=0
+TasksMax=1024
+UMask=0077
+Restart=always
+RestartSec=10s
+TimeoutStopSec=5min
+KillMode=mixed
+NoNewPrivileges=true
+CapabilityBoundingSet=
+ProtectSystem=strict
+ReadWritePaths=/var/lib/github-runners/%i
+ProtectHome=true
+PrivateTmp=true
+PrivateDevices=true
+ProtectKernelTunables=true
+ProtectKernelModules=true
+ProtectControlGroups=true
+RestrictSUIDSGID=true
+InaccessiblePaths=-/run/docker.sock -/var/lib/docker -/var/lib/containerd
+
+[Install]
+WantedBy=multi-user.target
