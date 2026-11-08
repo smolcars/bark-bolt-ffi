@@ -38,7 +38,7 @@ jobs:
       - run: cargo test --locked
   android-build:
     # Keep this immutable pin synchronized with runner group 12's workflow allowlist.
-    uses: smolcars/bark-bolt-ffi/.github/workflows/android-build.yml@014197e5d50e52a7d21fff51b7b07b610c567c72
+    uses: smolcars/bark-bolt-ffi/.github/workflows/android-build.yml@2220587204813b4ea42c034302fa22031457a986
   android:
     needs: android-build
     runs-on: blacksmith-4vcpu-ubuntu-2404
