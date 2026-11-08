@@ -86,35 +86,11 @@ Nix shell/lockfile, reusable build workflow, Android CI artifact/runtime helpers
 JVM test staging, and test-only Rust script paths. Approved PR builds use the
 same protected runner pool; accelerated runtime tests stay on Blacksmith.
 
-- [ ] Implement pinned Nix compilation and a portable compiled-artifact handoff.
-- [ ] Configure immutable workflow access and required PR approval.
+- [x] Implement pinned Nix compilation and a portable compiled-artifact handoff.
+- [x] Configure immutable workflow access and required PR approval.
 - [ ] Validate real Linux compilation, artifact checks, and focused regressions.
 - [ ] Pass actual split Android CI, including emulator and live RegTest tests.
-- [ ] Open a pull request with results and remaining limits.
-
-### 32 — Linux self-hosted runner pool
-
-**Engineering plan and affected paths:** [Linux runner plan](plans/32-linux-self-hosted-runners.md),
-`ops/github-runner@.service`, `ops/ci-runners.slice`, and dedicated accounts/services
-on the existing 18-vCPU Linux host. Preserve existing wallet services and volumes.
-
-- [x] Install three separate, unprivileged runner services with CPU/memory limits.
-- [x] Register `linux-blixt-europe`, `linux-blixt-europe-2`, and
-  `linux-blixt-europe-3` in a restricted organization runner group.
-- [x] Verify online registration, service restrictions, and Nix daemon access.
-- [x] Resize to two active runners with six CPUs / 16 GiB each; stop and disable
-  the third while retaining its installation and registration.
-- [x] Bound Nix daemon builds and both runners within the shared CI resource
-  budget; verify a real Nix derivation as an unprivileged runner account.
-
-**Remaining limits:** Android build migration and project Nix flakes are separate
-tasks. Installation does not establish successful CI or concurrent build performance.
-The [execution record](plans/32-linux-self-hosted-runners.md#execution-outcomes)
-contains the passed host checks and two online, idle runners in group 12; the
-third remains registered but disabled/offline. Nix defaults to two derivations
-with three cores each and has an enforced six-CPU / 8 GiB daemon limit. Runners
-and Nix share a 12-CPU / 32 GiB ceiling. Repository access remains closed until
-the trusted build workflows are ready.
+- [x] Open [PR #12](https://github.com/smolcars/bark-bolt-ffi/pull/12) with results and remaining limits.
 
 ### 31 — Check VTXOs with the server after a restore (v0.10.0)
 

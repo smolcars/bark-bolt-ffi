@@ -1,89 +1,38 @@
-# Android compilation on the Linux runner pool
+# Android CI build split
 
-## Engineering plan
+## Plan
 
-The user wants Android compilation moved off paid Blacksmith machines while
-retaining accelerated emulator tests there. Approved PR builds should also use
-the shared Linux host. This change builds on task 32's two bounded runner services.
+Move compilation to the existing Linux pool; keep accelerated tests on Blacksmith.
+PR builds require owner approval, enforced by an immutable reusable workflow and
+its organization runner-group allowlist. Main/tag and explicit trusted dispatches
+use the same build definition without the PR approval environment.
 
-### Paths and interfaces
+Affected paths: the two Android CI workflows, `flake.nix`/`flake.lock`, the build
+script and compiled-test transfer helper, JVM test staging, three test-only Rust
+script paths, existing Python regression tests, the README CI paragraph, and this
+execution checklist. Runner provisioning, systemd units, setup history, and other
+documentation changes are outside this PR and will be removed from its diff.
 
-- Add `flake.nix` / `flake.lock`: one pinned Linux Android development shell with
-  Java 17, Rustup (Rust itself remains pinned by `rust-toolchain.toml`), protobuf,
-  Android API 35/build-tools 35.0.0/NDK 28.2.13676358, BoltFFI 0.31.1, and existing
-  build utilities. Package the checksum-verified BoltFFI CLI using Nix's ELF
-  runtime patching because its upstream Linux binary requires glibc 2.39, newer
-  than Debian 12. This patch applies only to the build tool, not SDK artifacts.
-  Use `mkShellNoCC` and the Linux host's C compiler deliberately: the desktop JNI
-  library and Rust test executables must link the host glibc, rather than acquire
-  Nix-store runtime dependencies that Blacksmith does not have. Supported build
-  baselines are Debian 12 and Ubuntu 24.04; verify the actual output dependencies.
-- Add `.github/workflows/android-build.yml`, a reusable workflow called at an
-  immutable commit. Only this exact workflow/ref may access runner group 12.
-  Its fixed definition requires the `android-pr-build` protected environment for
-  every PR invocation. Configure the repository owner as required reviewer;
-  approve the concrete PR commit before executing its scripts on the host.
-  Allow only `pull_request`, trusted main/tag pushes, and explicit dispatch events.
-  No arbitrary checkout-ref input or inherited repository secrets.
-- Change `.github/workflows/ci.yml`: call the pinned build workflow, then run the
-  existing `android` acceptance gate on Blacksmith using compiled artifacts from
-  that build in the same workflow run. Retain Rust and Apple jobs unchanged.
-- Add `scripts/ci-android-build.sh` and `scripts/android-ci.py`: compile all current
-  SDK/app outputs and Rust test executables, bundle a narrow runtime payload with
-  source commit/file hashes, verify/extract it on Blacksmith, and execute tests
-  without Cargo, Gradle, SDK generation, or Kotlin compilation on Blacksmith.
-- Update `sdk/jvm/build.gradle.kts`: stage compiled main/test classes and runtime
-  dependencies, reusing the current contract-class list. On Blacksmith run both
-  regular-classpath and packaged-JAR live contracts directly with Java.
-- Replace three test-only absolute `CARGO_MANIFEST_DIR` script paths in Rust unit
-  tests with the repository-relative path already used by integration tests.
-  The prebuilt tests run from the checked-out repository root on Blacksmith.
-- Add focused Python tests for payload provenance and instrumentation failure
-  detection. Update this record, task 33, and CI operating instructions.
+Use pinned Nix Android/Java/protobuf/BoltFFI tools and existing Rust 1.99.1. Give
+BoltFFI its required Nix runtime libraries; use the host compiler for portable JNI
+and Rust tests. Keep each runner's project caches outside checkout cleanup.
 
-### Ownership, caching, and access
+Transfer only compiled SDKs/APKs, Rust executables and JVM classes/dependencies
+from the same commit. Verify the payload before executing it. Preserve the full
+main/tag and lean PR ABI matrices, API/alignment/package checks, existing Rust/JVM/
+Android/RegTest coverage, and final `android-sdk-app-reports` artifact name.
+Blacksmith runs compiled tests directly rather than compiling again. Keep RegTest
+isolated by workflow run and clean up only that run's containers/volumes.
 
-Each runner retains its own project Cargo target/download cache, Rust toolchains,
-and Gradle cache outside checkout cleanup. No Docker access on the build host.
-The original six-CPU/16-GiB runner and shared Nix resource limits stay unchanged.
-The Nix lockfile is committed and CI must not update it implicitly.
+No wallet logic, SDK API, persistence or transaction-validation change. Existing
+runner services and wallet containers are not modified by the PR cleanup.
 
-Configure `android-pr-build` approval before granting runner access. Scope the
-runner group to this repository and the exact pinned reusable workflow, with
-public repository access enabled only for that restricted definition. A PR cannot
-remove approval by changing its caller workflow. Updating the reusable workflow
-requires a new immutable pin and matching group allowlist update, recorded here.
-The current PR's approval is a user decision; do not approve it on the user's behalf.
+## Validation and remaining work
 
-### Invariants
-
-Preserve the full main/tag ABI matrix, lean PR matrix, API generation checks,
-16-KiB alignment gate, packaged AAR/JAR checks, Rust/Java contracts, Android
-instrumentation, and live app RegTest acceptance. Apps use SDKs built from the
-same source commit. Upload artifacts under the existing final
-`android-sdk-app-reports` name so release staging keeps its contract.
-
-Only explicit runtime payload paths cross jobs; executable modes survive inside
-the archive. Reject a mismatched source commit or modified payload before tests.
-Verify instrumentation reports a positive test count and fails on runner errors.
-RegTest remains isolated on Blacksmith, with per-run Compose project names and
-explicit cleanup/log capture. Never alter existing host wallet containers/volumes.
-No upstream wallet behavior, persistence, transaction validation, or SDK API change.
-
-### Dependencies and validation
-
-Start from current `origin/main` (the initial local checkout was stale). Existing
-task 28 is now a released wallet change, so record runner provisioning as task 32
-and this migration as task 33.
-
-Validate workflow syntax with actionlint and scripts with ShellCheck/Python tests.
-Evaluate and lock the Nix shell, then execute the real build on the Linux host as
-the unprivileged runner user under the service resource limits. Check native ELF
-dependencies and exercise the runtime payload. Open a real PR with the plan and
-changes. Record actual CI evidence separately: an environment approval request,
-local build, or YAML check does not establish hosted runtime acceptance. Do not
-mark the migration complete until the real split CI passes.
-
-## Outcomes
-
-Pending implementation and real build/CI validation.
+- Passed: actionlint, ShellCheck, 13 Python tests, Swift release-file integrity.
+- Configured and exercised: immutable runner access and required PR approval.
+- Real Linux release-matrix build and split [PR #12 CI](https://github.com/smolcars/bark-bolt-ffi/pull/12)
+  are running. The first live check found the upstream CLI's glibc requirement;
+  packaging that build tool in Nix resolved it. Compilation is now in progress.
+- Pending: completed native build, payload portability and live Blacksmith tests.
+  Do not mark runtime acceptance complete from syntax checks or an approval gate.

@@ -55,36 +55,3 @@ Docker. Never approve untrusted fork code for this machine. For managed runners,
 use a dedicated isolated host/account and workflow-restricted runner groups
 where available; a public-repository runner should not be a permanent process
 on a personal developer account. See [GitHub's runner access guidance](https://docs.github.com/en/actions/how-tos/manage-runners/self-hosted-runners/manage-access).
-
-## Linux Android build runners
-
-`linux-blixt-europe` and `linux-blixt-europe-2` run the Android compilation job,
-with six CPUs and a 16 GiB memory cap each. The third registration is retained but
-disabled. Both runner processes and the Nix daemon share a 12-CPU/32-GiB ceiling.
-Their systemd definitions are tracked in `ops/`; each account has a private home,
-project caches, and workspace, with no sudo or host Docker socket access.
-
-The `linux-blixt-europe` organization group allows only this repository and the
-exact immutable `.github/workflows/android-build.yml` revision called in `ci.yml`.
-That workflow requires `android-pr-build` approval from the repository owner for
-every PR build. Review the concrete source commit before approving; approval
-grants that code access to the runner account and its persistent caches. Main/tag
-pushes and explicit trusted dispatches use `android-trusted-build` instead.
-
-When changing the reusable build workflow, commit its reviewed definition first,
-then update both the caller's SHA pin and the runner group's selected workflow
-entry. A PR cannot bypass approval by replacing the caller or its environment.
-No administrator token is installed on the build host.
-
-Nix build commands use the committed lockfile and each project's pinned shell.
-The Android SDK/NDK, BoltFFI CLI and Java/protobuf/build utilities come from Nix; Rust 1.99.1 is
-selected through Rustup and `rust-toolchain.toml`. Host-linked JNI/Rust binaries
-use `/usr/bin/cc` rather than the Nix compiler so Blacksmith can load them without
-installing Nix. The build checks their dynamic dependencies before upload.
-
-The runtime payload includes compiled APKs, JVM main/test classes and dependencies,
-Rust test executables, release SDK files, and a source-commit/checksum manifest.
-Blacksmith verifies that payload against its checkout and runs the existing
-acceptance tests directly, without Gradle or Cargo compilation. Emulator/KVM and
-the per-run Docker RegTest stack remain on Blacksmith; cleanup affects only that
-run's Compose project. The final artifact remains `android-sdk-app-reports`.
