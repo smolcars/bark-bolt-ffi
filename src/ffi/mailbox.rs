@@ -542,7 +542,7 @@ mod tests {
         }
         fn regtest(args: &[&str]) -> String {
             let output = std::process::Command::new("bash")
-                .arg(concat!(env!("CARGO_MANIFEST_DIR"), "/scripts/ark-dev.sh"))
+                .arg("scripts/ark-dev.sh")
                 .args(args)
                 .output()
                 .unwrap();

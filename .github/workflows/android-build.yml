@@ -1,0 +1,49 @@
+name: Android compilation
+on:
+  workflow_call:
+permissions:
+  contents: read
+jobs:
+  build:
+    # This definition is pinned in ci.yml and in the organization runner group.
+    if: >-
+      github.repository == 'smolcars/bark-bolt-ffi' &&
+      (github.event_name == 'pull_request' || github.event_name == 'workflow_dispatch' ||
+       (github.event_name == 'push' &&
+        (github.ref == 'refs/heads/main' || startsWith(github.ref, 'refs/tags/v'))))
+    runs-on:
+      group: linux-blixt-europe
+      labels: linux-blixt-europe
+    environment: ${{ github.event_name == 'pull_request' && 'android-pr-build' || 'android-trusted-build' }}
+    timeout-minutes: 90
+    env:
+      CARGO_TERM_COLOR: always
+      CARGO_BUILD_JOBS: 6
+      CARGO_PROFILE_DEV_DEBUG: 0
+      BARK_PR_BUILD: ${{ github.event_name == 'pull_request' && '1' || '0' }}
+    steps:
+      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+        with:
+          persist-credentials: false
+      - name: Use persistent project caches outside checkout cleanup
+        run: |
+          echo "CARGO_HOME=$HOME/.cache/bark-bolt-ffi/cargo" >> "$GITHUB_ENV"
+          echo "CARGO_TARGET_DIR=$HOME/.cache/bark-bolt-ffi/target" >> "$GITHUB_ENV"
+          echo "GRADLE_USER_HOME=$HOME/.cache/bark-bolt-ffi/gradle" >> "$GITHUB_ENV"
+      - name: Build SDKs, apps, and portable acceptance tests
+        run: nix develop --no-update-lock-file .#android --command bash scripts/ci-android-build.sh
+      - uses: actions/upload-artifact@cf430e030ddbb5b0abf93d22962f4752f3646cd9 # v7.0.2
+        with:
+          name: android-build
+          retention-days: 1
+          compression-level: 0
+          if-no-files-found: error
+          path: artifacts/android-build.tar.gz
+      - if: failure()
+        uses: actions/upload-artifact@cf430e030ddbb5b0abf93d22962f4752f3646cd9 # v7.0.2
+        with:
+          name: android-build-failure-reports
+          retention-days: 3
+          path: |
+            sdk/jvm/build/reports
+            examples/android/build/reports

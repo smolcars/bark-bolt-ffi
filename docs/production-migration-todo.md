@@ -79,6 +79,19 @@ different claims. Record them separately; do not mark one from evidence of anoth
 
 ## Tasks
 
+### 33 — Android compilation on the Linux runner pool
+
+**Engineering plan and affected paths:** [Android runner migration](plans/33-android-build-runner.md),
+Nix shell/lockfile, reusable build workflow, Android CI artifact/runtime helpers,
+JVM test staging, and test-only Rust script paths. Approved PR builds use the
+same protected runner pool; accelerated runtime tests stay on Blacksmith.
+
+- [ ] Implement pinned Nix compilation and a portable compiled-artifact handoff.
+- [ ] Configure immutable workflow access and required PR approval.
+- [ ] Validate real Linux compilation, artifact checks, and focused regressions.
+- [ ] Pass actual split Android CI, including emulator and live RegTest tests.
+- [ ] Open a pull request with results and remaining limits.
+
 ### 32 — Linux self-hosted runner pool
 
 **Engineering plan and affected paths:** [Linux runner plan](plans/32-linux-self-hosted-runners.md),

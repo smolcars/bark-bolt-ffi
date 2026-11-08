@@ -23,11 +23,21 @@ publishing { publications { create<MavenPublication>("jvm") {
     groupId = project.group.toString(); artifactId = "bark-bolt-ffi-jvm-$nativeHost"; version = project.version.toString()
 } } }
 
+val contractTests = listOf("ContractTest", "NoahContractTest", "NoahP1ContractTest", "V030ContractTest", "V070ContractTest", "FullBalanceContractTest", "PaymentRequestContractTest", "MailboxProcessorContractTest")
 tasks.register<JavaExec>("testPackaged") {
     dependsOn(tasks.testClasses, tasks.jar)
     classpath = files(tasks.jar) + (sourceSets.test.get().runtimeClasspath - sourceSets.main.get().output)
     mainClass.set("org.junit.runner.JUnitCore")
-    args("ContractTest", "NoahContractTest", "NoahP1ContractTest", "V030ContractTest", "V070ContractTest", "FullBalanceContractTest", "PaymentRequestContractTest", "MailboxProcessorContractTest")
+    args(contractTests)
     systemProperty("bark.fixtures", rootProject.file("tests/fixtures").absolutePath)
     environment("BARK_REGTEST", System.getenv("BARK_REGTEST") ?: "")
+}
+
+tasks.register<Sync>("stageCiTests") {
+    dependsOn(tasks.testClasses, tasks.jar)
+    into(layout.buildDirectory.dir("ci-runtime"))
+    from(sourceSets.main.get().output) { into("main") }
+    from(sourceSets.test.get().output) { into("test") }
+    from(configurations.testRuntimeClasspath) { into("lib") }
+    doLast { destinationDir.resolve("test-classes.txt").writeText(contractTests.joinToString("\n")) }
 }

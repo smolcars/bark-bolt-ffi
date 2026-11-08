@@ -21,6 +21,38 @@ def load_script(name):
 artifact = load_script('swift-artifact')
 runner = load_script('ci-regtest-runner')
 alignment = load_script('check-android-alignment')
+android_ci = load_script('android-ci')
+
+
+class AndroidRuntimeTests(unittest.TestCase):
+    def test_payload_rejects_wrong_commit_and_modified_file(self):
+        with tempfile.TemporaryDirectory() as directory:
+            root = Path(directory)
+            name = 'artifacts/android-runtime/rust/test-binary'
+            path = root / name
+            path.parent.mkdir(parents=True)
+            path.write_bytes(b'compiled test fixture')
+            manifest = {'source_commit': 'expected', 'rust_tests': [name],
+                        'files': {name: android_ci.checksum(path)}}
+            android_ci.verify(manifest, 'expected', root)
+            with self.assertRaisesRegex(ValueError, 'different commit'):
+                android_ci.verify(manifest, 'other', root)
+            path.write_bytes(b'tampered')
+            with self.assertRaisesRegex(ValueError, 'checksum mismatch'):
+                android_ci.verify(manifest, 'expected', root)
+
+    def test_payload_cannot_overwrite_source_or_escape_checkout(self):
+        for name in ['../outside', '/absolute', '.git/config', 'scripts/ark-dev.sh',
+                     'sdk/jvm/build/libs/../../../../Cargo.toml']:
+            with self.subTest(name=name), self.assertRaises(ValueError):
+                android_ci.payload_path(name)
+
+    def test_instrumentation_must_run_tests_and_report_success(self):
+        self.assertEqual(3, android_ci.instrumentation_count('Time: 1.2\n\nOK (3 tests)\n\nINSTRUMENTATION_CODE: -1\n'))
+        for output in ['OK (0 tests)', 'FAILURES!!!\nTests run: 3, Failures: 1',
+                       'INSTRUMENTATION_FAILED: no runner', 'OK (3 tests)\nshortMsg=crashed', '']:
+            with self.subTest(output=output), self.assertRaises(ValueError):
+                android_ci.instrumentation_count(output)
 
 
 class AndroidAlignmentTests(unittest.TestCase):
