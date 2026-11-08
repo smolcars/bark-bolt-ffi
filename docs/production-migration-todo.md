@@ -79,7 +79,7 @@ different claims. Record them separately; do not mark one from evidence of anoth
 
 ## Tasks
 
-### 33 — Android compilation on the Linux runner pool
+### 33 — Rust and Android compilation on the Linux runner pool
 
 **Engineering plan and affected paths:** [Android runner migration](plans/33-android-build-runner.md),
 Nix shell/lockfile, reusable build workflow, Android CI artifact/runtime helpers,
@@ -88,6 +88,7 @@ same protected runner pool; accelerated runtime tests stay on Blacksmith.
 
 - [x] Implement pinned Nix compilation and a portable compiled-artifact handoff.
 - [x] Configure immutable workflow access and approval for fork/untrusted PRs.
+- [ ] Move Rust checks to the shared Linux workflow and minimal Nix shell; pass actual CI.
 - [ ] Validate real Linux compilation, artifact checks, and focused regressions.
 - [ ] Pass actual split Android CI, including emulator and live RegTest tests.
 - [x] Open [PR #12](https://github.com/smolcars/bark-bolt-ffi/pull/12) with results and remaining limits.

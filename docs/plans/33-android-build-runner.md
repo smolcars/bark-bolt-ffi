@@ -1,14 +1,21 @@
-# Android CI build split
+# Linux CI builds
 
 ## Plan
 
 Move compilation to the existing Linux pool; keep accelerated tests on Blacksmith.
+Move the existing Rust formatting, Clippy, Python/shell checks and offline tests to
+the same pool. Add a minimal `.#rust` shell sharing Rust/native tools with Android,
+without Android SDK/Java dependencies. Replace the Android-only reusable workflow
+with one pinned Linux workflow accepting only `rust` or `android`; retain the same
+trust policy and project Cargo caches. Keep every existing Rust check and tag
+provenance check. Validate Nix evaluation, workflow syntax and real Rust CI before
+marking that migration complete. No runner/service provisioning is part of this PR.
 Same-repository PRs authored by owners, members or collaborators build automatically.
 Fork PRs and other authors require owner approval, enforced by an immutable reusable
 workflow and its runner-group allowlist. Main/tag and explicit trusted dispatches
 also run automatically. Verify this PR starts without a deployment approval.
 
-Affected paths: the two Android CI workflows, `flake.nix`/`flake.lock`, the build
+Affected paths: the CI and reusable Linux workflows, `flake.nix`/`flake.lock`, the build
 script and compiled-test transfer helper, JVM test staging, three test-only Rust
 script paths, existing Python regression tests, the README CI paragraph, and this
 execution checklist. Runner provisioning, systemd units, setup history, and other
