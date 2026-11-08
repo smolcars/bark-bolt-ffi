@@ -87,7 +87,7 @@ JVM test staging, and test-only Rust script paths. Approved PR builds use the
 same protected runner pool; accelerated runtime tests stay on Blacksmith.
 
 - [x] Implement pinned Nix compilation and a portable compiled-artifact handoff.
-- [x] Configure immutable workflow access and required PR approval.
+- [x] Configure immutable workflow access and approval for fork/untrusted PRs.
 - [ ] Validate real Linux compilation, artifact checks, and focused regressions.
 - [ ] Pass actual split Android CI, including emulator and live RegTest tests.
 - [x] Open [PR #12](https://github.com/smolcars/bark-bolt-ffi/pull/12) with results and remaining limits.

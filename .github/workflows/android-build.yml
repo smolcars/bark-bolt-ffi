@@ -14,7 +14,11 @@ jobs:
     runs-on:
       group: linux-blixt-europe
       labels: linux-blixt-europe
-    environment: ${{ github.event_name == 'pull_request' && 'android-pr-build' || 'android-trusted-build' }}
+    environment: >-
+      ${{ github.event_name == 'pull_request' &&
+          (github.event.pull_request.head.repo.full_name != github.repository ||
+           !contains(fromJSON('["OWNER", "MEMBER", "COLLABORATOR"]'), github.event.pull_request.author_association)) &&
+          'android-pr-build' || 'android-trusted-build' }}
     timeout-minutes: 90
     env:
       CARGO_TERM_COLOR: always

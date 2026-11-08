@@ -3,9 +3,10 @@
 ## Plan
 
 Move compilation to the existing Linux pool; keep accelerated tests on Blacksmith.
-PR builds require owner approval, enforced by an immutable reusable workflow and
-its organization runner-group allowlist. Main/tag and explicit trusted dispatches
-use the same build definition without the PR approval environment.
+Same-repository PRs authored by owners, members or collaborators build automatically.
+Fork PRs and other authors require owner approval, enforced by an immutable reusable
+workflow and its runner-group allowlist. Main/tag and explicit trusted dispatches
+also run automatically. Verify this PR starts without a deployment approval.
 
 Affected paths: the two Android CI workflows, `flake.nix`/`flake.lock`, the build
 script and compiled-test transfer helper, JVM test staging, three test-only Rust
@@ -30,7 +31,8 @@ runner services and wallet containers are not modified by the PR cleanup.
 ## Validation and remaining work
 
 - Passed: actionlint, ShellCheck, 13 Python tests, Swift release-file integrity.
-- Configured and exercised: immutable runner access and required PR approval.
+- Configured and exercised: immutable runner access and the approval environment.
+  Narrow approval to fork/untrusted PRs so trusted pushes do not repeatedly stop.
 - Real Linux release-matrix build and split [PR #12 CI](https://github.com/smolcars/bark-bolt-ffi/pull/12)
   are running. The first live check found the upstream CLI's glibc requirement;
   packaging that build tool in Nix resolved it. Compilation is now in progress.
