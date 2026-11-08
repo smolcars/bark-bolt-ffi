@@ -10,7 +10,10 @@ the shared Linux host. This change builds on task 32's two bounded runner servic
 
 - Add `flake.nix` / `flake.lock`: one pinned Linux Android development shell with
   Java 17, Rustup (Rust itself remains pinned by `rust-toolchain.toml`), protobuf,
-  Android API 35/build-tools 35.0.0/NDK 28.2.13676358, and existing build utilities.
+  Android API 35/build-tools 35.0.0/NDK 28.2.13676358, BoltFFI 0.31.1, and existing
+  build utilities. Package the checksum-verified BoltFFI CLI using Nix's ELF
+  runtime patching because its upstream Linux binary requires glibc 2.39, newer
+  than Debian 12. This patch applies only to the build tool, not SDK artifacts.
   Use `mkShellNoCC` and the Linux host's C compiler deliberately: the desktop JNI
   library and Rust test executables must link the host glibc, rather than acquire
   Nix-store runtime dependencies that Blacksmith does not have. Supported build

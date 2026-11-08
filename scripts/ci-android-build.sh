@@ -9,8 +9,8 @@ rustup toolchain install "$RUSTUP_TOOLCHAIN" --profile minimal
 targets=(aarch64-linux-android x86_64-linux-android)
 if [[ "${BARK_PR_BUILD:-0}" != 1 ]]; then targets+=(armv7-linux-androideabi); fi
 rustup target add "${targets[@]}"
-scripts/install-boltffi.sh
-export BOLTFFI="$PWD/target/tools/boltffi"
+export BOLTFFI
+BOLTFFI="$(command -v boltffi)"
 just build-android --release
 "$BOLTFFI" generate swift --deny-skipped
 python3 scripts/check-api.py
@@ -20,5 +20,6 @@ python3 scripts/check-api.py
     :examples:android:assembleDebugAndroidTest
 python3 scripts/check-android-alignment.py
 python3 scripts/check-kotlin-artifacts.py
+mkdir -p target
 cargo test --locked --no-run --message-format=json > target/ci-rust-tests.jsonl
 python3 scripts/android-ci.py bundle

@@ -21,11 +21,25 @@
         includeSystemImages = false;
       };
       sdk = "${android.androidsdk}/libexec/android-sdk";
+      boltffi = pkgs.stdenvNoCC.mkDerivation {
+        pname = "boltffi";
+        version = "0.31.1";
+        src = pkgs.fetchurl {
+          url = "https://github.com/boltffi/boltffi/releases/download/v0.31.1/boltffi-linux-x86_64.tar.gz";
+          sha256 = "ae02515544f6553e72b2fd5ea99ed604b047d163dfb7fa2e1534dda92756cc28";
+        };
+        nativeBuildInputs = [ pkgs.autoPatchelfHook ];
+        buildInputs = [ pkgs.stdenv.cc.cc.lib ];
+        dontConfigure = true;
+        dontBuild = true;
+        unpackPhase = ''tar -xzf "$src"'';
+        installPhase = ''install -Dm755 boltffi "$out/bin/boltffi"'';
+      };
     in {
       devShells.${system}.android = pkgs.mkShellNoCC {
         packages = with pkgs; [
           bash git curl unzip python3 just jq cmake pkg-config protobuf
-          rustup jdk17 android.androidsdk
+          rustup jdk17 android.androidsdk boltffi
         ];
         JAVA_HOME = pkgs.jdk17.home;
         ANDROID_HOME = sdk;

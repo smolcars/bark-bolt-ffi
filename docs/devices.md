@@ -77,7 +77,7 @@ entry. A PR cannot bypass approval by replacing the caller or its environment.
 No administrator token is installed on the build host.
 
 Nix build commands use the committed lockfile and each project's pinned shell.
-The Android SDK/NDK and Java/protobuf/build utilities come from Nix; Rust 1.99.1 is
+The Android SDK/NDK, BoltFFI CLI and Java/protobuf/build utilities come from Nix; Rust 1.99.1 is
 selected through Rustup and `rust-toolchain.toml`. Host-linked JNI/Rust binaries
 use `/usr/bin/cc` rather than the Nix compiler so Blacksmith can load them without
 installing Nix. The build checks their dynamic dependencies before upload.
