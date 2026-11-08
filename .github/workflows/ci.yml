@@ -18,27 +18,14 @@ env:
   BARK_PR_BUILD: ${{ github.event_name == 'pull_request' && '1' || '0' }}
 jobs:
   rust:
-    runs-on: blacksmith-4vcpu-ubuntu-2404
-    timeout-minutes: 30
-    steps:
-      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
-      - run: sudo apt-get update && sudo apt-get install -y protobuf-compiler cmake pkg-config libssl-dev just jq shellcheck
-      - run: rustup toolchain install 1.99.1 --profile minimal --component rustfmt,clippy
-      # Restore everywhere, save only from main: PR and tag entries are unreadable elsewhere and evict main's.
-      - uses: Swatinem/rust-cache@d1527c8f67ef9af357290475d4af4b0fab8f12e0 # v2.9.3
-        with:
-          save-if: ${{ github.ref == 'refs/heads/main' }}
-      - run: python3 scripts/swift-artifact.py
-      - if: github.ref_type == 'tag'
-        run: python3 scripts/swift-artifact.py --check-source
-      - run: python3 -m unittest discover -s tests/python -v
-      - run: shellcheck scripts/ark-dev.sh tests/shell/ark-dev.sh && bash tests/shell/ark-dev.sh
-      - run: cargo fmt --check
-      - run: cargo clippy --locked --all-targets -- -D warnings
-      - run: cargo test --locked
+    uses: smolcars/bark-bolt-ffi/.github/workflows/linux-build.yml@f079b38fb02fdb0480abd3918cead2189fac16a6
+    with:
+      target: rust
   android-build:
     # Keep this immutable pin synchronized with runner group 12's workflow allowlist.
-    uses: smolcars/bark-bolt-ffi/.github/workflows/android-build.yml@2220587204813b4ea42c034302fa22031457a986
+    uses: smolcars/bark-bolt-ffi/.github/workflows/linux-build.yml@f079b38fb02fdb0480abd3918cead2189fac16a6
+    with:
+      target: android
   android:
     needs: android-build
     runs-on: blacksmith-4vcpu-ubuntu-2404
