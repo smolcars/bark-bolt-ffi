@@ -18,75 +18,47 @@ env:
   BARK_PR_BUILD: ${{ github.event_name == 'pull_request' && '1' || '0' }}
 jobs:
   rust:
-    runs-on: blacksmith-4vcpu-ubuntu-2404
-    timeout-minutes: 30
-    steps:
-      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
-      - run: sudo apt-get update && sudo apt-get install -y protobuf-compiler cmake pkg-config libssl-dev just jq shellcheck
-      - run: rustup toolchain install 1.99.1 --profile minimal --component rustfmt,clippy
-      # Restore everywhere, save only from main: PR and tag entries are unreadable elsewhere and evict main's.
-      - uses: Swatinem/rust-cache@d1527c8f67ef9af357290475d4af4b0fab8f12e0 # v2.9.3
-        with:
-          save-if: ${{ github.ref == 'refs/heads/main' }}
-      - run: python3 scripts/swift-artifact.py
-      - if: github.ref_type == 'tag'
-        run: python3 scripts/swift-artifact.py --check-source
-      - run: python3 -m unittest discover -s tests/python -v
-      - run: shellcheck scripts/ark-dev.sh tests/shell/ark-dev.sh && bash tests/shell/ark-dev.sh
-      - run: cargo fmt --check
-      - run: cargo clippy --locked --all-targets -- -D warnings
-      - run: cargo test --locked
+    uses: smolcars/bark-bolt-ffi/.github/workflows/linux-build.yml@f079b38fb02fdb0480abd3918cead2189fac16a6
+    with:
+      target: rust
+  android-build:
+    # Keep this immutable pin synchronized with runner group 12's workflow allowlist.
+    uses: smolcars/bark-bolt-ffi/.github/workflows/linux-build.yml@f079b38fb02fdb0480abd3918cead2189fac16a6
+    with:
+      target: android
   android:
+    needs: android-build
     runs-on: blacksmith-4vcpu-ubuntu-2404
-    timeout-minutes: 75
+    timeout-minutes: 45
+    env:
+      COMPOSE_PROJECT_NAME: bark-bolt-ffi-ci-${{ github.run_id }}-${{ github.run_attempt }}
     steps:
       - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+        with:
+          persist-credentials: false
+      - uses: actions/download-artifact@9000827ccba6bdab643e8b6fd33ac0654aef8333 # v8.0.2
+        with:
+          name: android-build
+          path: artifacts
+      - name: Verify and unpack binaries built from this commit
+        run: python3 scripts/android-ci.py unpack
       - uses: actions/setup-java@b843ebf9b913146b38da2eaa7aeddf76074ae1ad # v6.1.0
         with:
           distribution: temurin
           java-version: '17'
-      - run: sudo apt-get update && sudo apt-get install -y protobuf-compiler cmake pkg-config libssl-dev just jq
-      - run: rustup toolchain install 1.99.1 --profile minimal
-      - run: rustup target add aarch64-linux-android x86_64-linux-android
-      - if: github.event_name != 'pull_request'
-        run: rustup target add armv7-linux-androideabi
+      - run: sudo apt-get update && sudo apt-get install -y just jq
       - uses: android-actions/setup-android@be39fa834029ff78f1a44aa3bb0819b8fc2bd8fd # v4.0.4
         with:
           cmdline-tools-version: '11076708'
           packages: 'platform-tools'
-      - run: sdkmanager 'ndk;28.2.13676358' 'platforms;android-35' 'build-tools;35.0.0'
-      # Restore everywhere, save only from main: PR and tag entries are unreadable elsewhere and evict main's.
-      - uses: Swatinem/rust-cache@d1527c8f67ef9af357290475d4af4b0fab8f12e0 # v2.9.3
-        with:
-          save-if: ${{ github.ref == 'refs/heads/main' }}
-      - uses: actions/cache/restore@55cc8345863c7cc4c66a329aec7e433d2d1c52a9 # v6.1.0
-        with:
-          path: |
-            ~/.gradle/caches
-            ~/.gradle/wrapper
-          key: gradle-${{ runner.os }}-${{ hashFiles('**/*.gradle.kts', 'gradle/wrapper/gradle-wrapper.properties') }}
-          restore-keys: gradle-${{ runner.os }}-
-      - run: scripts/install-boltffi.sh
-      - run: BOLTFFI="$PWD/target/tools/boltffi" just build-android --release
-      - run: target/tools/boltffi generate swift --deny-skipped && python3 scripts/check-api.py
-      - run: ./gradlew :sdk:android:assembleRelease :sdk:android:generatePomFileForReleasePublication :sdk:jvm:test :sdk:jvm:jar :sdk:jvm:generatePomFileForJvmPublication :sdk:jvm:testPackaged :examples:android:assembleRelease :examples:android:assembleDebug :examples:android:assembleDebugAndroidTest
-      - if: github.ref == 'refs/heads/main'
-        uses: actions/cache/save@55cc8345863c7cc4c66a329aec7e433d2d1c52a9 # v6.1.0
-        with:
-          path: |
-            ~/.gradle/caches
-            ~/.gradle/wrapper
-          key: gradle-${{ runner.os }}-${{ hashFiles('**/*.gradle.kts', 'gradle/wrapper/gradle-wrapper.properties') }}
-      - name: Check every Android shared library supports 16 KB pages
-        run: python3 scripts/check-android-alignment.py
-      - run: python3 scripts/check-kotlin-artifacts.py
       - name: Enable emulator acceleration
         run: |
           echo 'KERNEL=="kvm", GROUP="kvm", MODE="0666", OPTIONS+="static_node=kvm"' | sudo tee /etc/udev/rules.d/99-kvm4all.rules
           sudo udevadm control --reload-rules
           sudo udevadm trigger --name-match=kvm
       - run: just setup-everything
-      - run: BARK_REGTEST=1 cargo test --locked -- --test-threads=1
+      - name: Run precompiled Rust acceptance tests
+        run: BARK_REGTEST=1 python3 scripts/android-ci.py rust
       - uses: ReactiveCircus/android-emulator-runner@a421e43855164a8197daf9d8d40fe71c6996bb0d # v2.38.0
         with:
           api-level: 35
@@ -94,9 +66,8 @@ jobs:
           profile: pixel_7
           disable-animations: true
           script: |
-            ./gradlew :examples:android:connectedDebugAndroidTest
-            BARK_REGTEST=1 ./gradlew :sdk:jvm:test :sdk:jvm:testPackaged
-            adb install -r examples/android/build/outputs/apk/debug/android-debug.apk
+            python3 scripts/android-ci.py instrument
+            BARK_REGTEST=1 python3 scripts/android-ci.py jvm
             just test-regtest --platform android
       - if: always()
         run: just logs --tail=200 > regtest.log
@@ -114,6 +85,8 @@ jobs:
             examples/android/build/outputs/apk
             examples/android/build/reports
             regtest.log
+      - if: always()
+        run: just down --volumes
   apple:
     runs-on: blacksmith-6vcpu-macos-15
     timeout-minutes: 90

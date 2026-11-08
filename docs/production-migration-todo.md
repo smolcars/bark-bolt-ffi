@@ -79,6 +79,21 @@ different claims. Record them separately; do not mark one from evidence of anoth
 
 ## Tasks
 
+### 33 — Rust and Android compilation on the Linux runner pool
+
+**Engineering plan and affected paths:** [Android runner migration](plans/33-android-build-runner.md),
+Nix shell/lockfile, reusable build workflow, Android CI artifact/runtime helpers,
+JVM test staging, and test-only Rust script paths. Approved PR builds use the
+same protected runner pool; accelerated runtime tests stay on Blacksmith.
+
+- [x] Implement pinned Nix compilation and a portable compiled-artifact handoff.
+- [x] Configure immutable workflow access and approval for fork/untrusted PRs.
+- [x] Move Rust checks to the shared Linux workflow and minimal Nix shell; pass actual CI.
+- [x] Validate real Linux compilation, artifact checks, and focused regressions.
+- [x] Pass actual split Android CI, including emulator and live RegTest tests
+  ([run 42445168836](https://github.com/smolcars/bark-bolt-ffi/actions/runs/42445168836), code `a57b3c3`).
+- [x] Open [PR #12](https://github.com/smolcars/bark-bolt-ffi/pull/12) with results and remaining limits.
+
 ### 31 — Check VTXOs with the server after a restore (v0.10.0)
 
 Plan: Noah restores wallets from encrypted backups of the Bark database. A

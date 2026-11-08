@@ -91,9 +91,10 @@ backend setup/funding/mining/RPC operation goes through the same Bash script.
 
 ## CI
 
-[SDK and native apps](.github/workflows/ci.yml) builds Rust, SwiftPM/XCFramework,
-Android AAR/JVM JAR and both apps on Blacksmith Linux/macOS runners. It executes
-SDK contracts, iOS UI tests and Android UI/RegTest tests.
+[SDK and native apps](.github/workflows/ci.yml) runs Rust checks and compiles Android
+SDKs, APKs and tests on the Nix-equipped `linux-blixt-europe` pool; fork/untrusted PRs require approval.
+Blacksmith runs those compiled tests, Android instrumentation and live RegTest.
+Apple SDK/app builds remain on Blacksmith.
 
 [Full cross-platform acceptance](.github/workflows/integration.yml) is manually
 dispatched on a macOS ARM64 runner with Xcode,

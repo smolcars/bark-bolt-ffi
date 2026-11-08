@@ -11,6 +11,36 @@ cat > "$temporary/bin/docker" <<'EOF'
 printf '%s\0' "$@" >> "$ARK_TEST_LOG"
 printf 'call\n' >> "$ARK_TEST_CALLS"
 case "${ARK_TEST_MODE:-}" in
+    lightning-startup)
+        case " $* " in
+            *' listwallets '*) printf '["miner"]\n' ;;
+            *' getnewaddress '*) printf 'miner-address\n' ;;
+            *' getblockcount '*) printf '100\n' ;;
+            *' getinfo '*) printf '{"id":"peer","binding":[{"port":9735}],"synced_to_chain":true,"block_height":100,"blockheight":100}\n' ;;
+            *' pendingchannels '*) printf '{"pending_open_channels":[]}\n' ;;
+            *' newaddress '*) printf '{"address":"lnd-address"}\n' ;;
+            *' newaddr '*) printf '{"bech32":"cln-address"}\n' ;;
+            *' walletbalance '*) printf '{"confirmed_balance":"2000000"}\n' ;;
+            *' listpeers '*) printf '{"peers":[]}\n' ;;
+            *' connect '*)
+                printf 'attempt\n' >> "$ARK_TEST_CONNECT_CALLS"
+                if [[ $(wc -l < "$ARK_TEST_CONNECT_CALLS") -eq 1 ]]; then
+                    echo '[lncli] server is still in the process of starting' >&2
+                    exit 1
+                fi
+                printf '{}\n'
+                ;;
+            *' openchannel '*) touch "$ARK_TEST_CHANNEL"; printf '{}\n' ;;
+            *' listchannels '*)
+                if [[ -f "$ARK_TEST_CHANNEL" ]]; then
+                    printf '{"channels":[{"active":true,"remote_pubkey":"peer"}]}\n'
+                else
+                    printf '{"channels":[]}\n'
+                fi
+                ;;
+            *) printf '{}\n' ;;
+        esac
+        ;;
     existing) printf 'yes\n' ;;
     fail) exit 42 ;;
     *) printf '[]\n' ;;
@@ -71,4 +101,10 @@ if "$script" generate invalid >/dev/null 2>&1; then
     echo 'Expected invalid block count failure' >&2; exit 1
 fi
 [[ ! -s "$ARK_TEST_CALLS" ]]
+
+# Chain sync can finish while LND still rejects peer connections during startup.
+export ARK_TEST_CONNECT_CALLS="$temporary/connect-calls" ARK_TEST_CHANNEL="$temporary/channel"
+ARK_TEST_MODE=lightning-startup "$script" setup-lightning-channels
+[[ $(wc -l < "$ARK_TEST_CONNECT_CALLS") -eq 2 ]]
+[[ -f "$ARK_TEST_CHANNEL" ]]
 echo 'Just/Bash argument forwarding, wallet preservation and failure checks pass'
