@@ -7,10 +7,10 @@ supported consumer languages. The Rust core remains in this repository.
 ## Swift
 
 Add `https://github.com/smolcars/bark-bolt-ffi` in Xcode's package dependencies,
-select version 0.10.0, and link the `BarkBoltFFI` product. In a package manifest:
+select version 0.11.0, and link the `BarkBoltFFI` product. In a package manifest:
 
 ```swift
-.package(url: "https://github.com/smolcars/bark-bolt-ffi.git", exact: "0.10.0")
+.package(url: "https://github.com/smolcars/bark-bolt-ffi.git", exact: "0.11.0")
 // Target dependency:
 .product(name: "BarkBoltFFI", package: "bark-bolt-ffi")
 ```
@@ -39,9 +39,9 @@ R8 rules. JVM JARs contain the native library for the build host; choose a JAR
 matching the deployment OS/architecture. Linux CI builds on Ubuntu24.04; rebuild
 locally when targeting an older libc. Maven Central publication is separate.
 The tag build attaches versioned AAR/JAR/POM files to each GitHub release, such as
-[v0.10.0](https://github.com/smolcars/bark-bolt-ffi/releases/tag/v0.10.0);
+[v0.11.0](https://github.com/smolcars/bark-bolt-ffi/releases/tag/v0.11.0);
 verify them against its SHA256SUMS. Releases attach the Linux x86_64 JVM JAR;
-build the Darwin JVM JAR from source. Use matching v0.10.0 bindings/native binaries,
+build the Darwin JVM JAR from source. Use matching v0.11.0 bindings/native binaries,
 including on Swift. 0.7.0 changed the ABI of `BarkError`, `ExitProgressStatus`, `EmergencyExitFeeEstimate` and `BroadcastOutcome`; 0.7.1, 0.7.2 and 0.7.3 do not change it further, 0.8.0 only adds two `Wallet` methods, 0.9.0 only adds `Wallet.nextUnusedAddress()` and `OnchainWallet.nextUnusedAddress()`, 0.10.0 only adds `Wallet.trustAndAdoptServerVtxoStatus()` with its `ServerStatusAdoption` and `VtxoInFlightState` enums, and 0.11.0 only adds `Wallet.presignEmergencyExit()`, `Wallet.remainingExitTransactions()` and `Wallet.bolt11InvoiceWith()` with their records and `PresignedExitStatus` enum. GitHub Actions also uploads artifacts and
 example APKs. To use a downloaded AAR or JVM JAR directly, include it as a local
 file dependency and declare `org.jetbrains.kotlinx:kotlinx-coroutines-core:1.10.2`

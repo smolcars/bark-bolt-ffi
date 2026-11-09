@@ -114,7 +114,10 @@ revision, since captaind 0.8.1 refuses older CLN. New API, so a minor release.
 - [x] Red/green unit test: prepared sends on a reopened wallet failed "not fully signed" after the bump and pass with Bark's signers.
 - [x] Live RegTest Rust test: presign, broadcast and confirm a shared two-VTXO exit plan wave by wave.
 - [x] Live RegTest invoice expiry, Swift and Kotlin contract tests.
-- [ ] Review, PR and CI.
+- [x] Review: GPT-6.1 Sol (high), one round, approved `2c8d632` with no findings.
+- [x] [PR #13](https://github.com/smolcars/bark-bolt-ffi/pull/13) CI and main CI full matrix ([run 42629153673](https://github.com/smolcars/bark-bolt-ffi/actions/runs/42629153673)): `rust`, `apple` and `android` passed at merge commit `344a9cb`.
+- [x] Stage CI artifacts and move install docs to 0.11.0.
+- [ ] Publish v0.11.0.
 
 [Execution evidence](validation/bark-081-2026-11-09.md).
 

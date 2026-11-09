@@ -1,21 +1,21 @@
 {
-  "archive_sha256": "bee0e937a0042957dda06909c97dd2646954c60dd5fcb9f4fc6dfecbdb21d1ac",
-  "bark": "0.8.0",
-  "bark_revision": "959a489ff4934b181783b41c7d3ee68d85b95cbf",
+  "archive_sha256": "d224043dbc8244916cbaed2730b704d7a63770dac727561a0aa41e8e6ab38cca",
+  "bark": "0.8.1",
+  "bark_revision": "303682063ed7559b06dcf37c5cb37bb7037b943f",
   "boltffi": "0.31.1",
   "files": {
     "FFI/discovery.c": "04bd35ec8619b7338d45d06da982daad26d980198e2a36704386226dcb1fe7ff",
     "FFI/include/ffi.h": "3b58b81a2b64c08441bcb57f4209b6b46498886863aac468dfbf7c15fc8e981e",
     "FFI/include/module.modulemap": "5417b8b003a67199f854575adaccfee47a51c147be3025bcc34bbb8903e2cc8b",
-    "Sources/BoltFFI/BarkBoltFfiBoltFFI.swift": "40b9c2b483110ef7157499e0ef1e5f20979cabda77fb53ecbe64e91792854ccd",
+    "Sources/BoltFFI/BarkBoltFfiBoltFFI.swift": "5fbbd0ceea754106f398a74e7e072be85c0b4d1453f8d68d225b28db5d75908a",
     "Sources/BoltFFI/Concurrency.swift": "a21884907d371360fab069b9ea83a4a0dfc01ba04c2057ab39327d610ed5e0f6",
     "Sources/BoltFFI/Mailbox.swift": "0e335111146baeeee909180894f85d40bea7d2982dc4c0b382f0be80206031db"
   },
   "minimum_ios": "16.0",
   "minimum_macos": "13.0",
-  "package_sha256": "99c20dfd8b004e41f5b90fba3d46849f9a2b09b61e9a7eb740838be9b59b549c",
+  "package_sha256": "d92b7357edfdd60b47f14f3cdd708c40ce0831a0e104b9194cd73d7a65138216",
   "profile": "release",
   "rust": "1.99.1",
-  "source_sha256": "a431761ee99a1464021aae9f150ea5dca838f40883284d1bcbaf81a96eaa8c16",
-  "version": "0.10.0"
+  "source_sha256": "91c1c4f6a7cdc755e648dc728827182cba2fd74010a505d11ac5db9c93c97fc2",
+  "version": "0.11.0"
 }

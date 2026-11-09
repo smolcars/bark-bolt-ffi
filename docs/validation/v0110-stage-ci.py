@@ -1,0 +1,82 @@
+"""Stage the real v0.11.0 Apple CI build after verifying its source and archive.
+
+Run from the repository root with the path of downloaded artifact 13681886687
+(`gh api repos/smolcars/bark-bolt-ffi/actions/artifacts/13681886687/zip`). This
+reuses the successful hosted five-ABI build; it does not claim a second local
+build or a local Cargo archive comparison.
+"""
+import importlib.util
+import json
+from pathlib import Path
+import plistlib
+import subprocess
+import shutil
+import sys
+import tempfile
+import zipfile
+
+root = Path(__file__).resolve().parents[2]
+run_id = '42629153673'
+source = '344a9cb29edefcd3fb0a8662dcab709cdacf107a'
+archive = Path(sys.argv[1])
+expected = 'f7ef3819bacd7e9ef9a91dd245e7e073382d748273b8f429c4fe9b983eb30e77'
+spec = importlib.util.spec_from_file_location('artifact', root / 'scripts/swift-artifact.py')
+artifact = importlib.util.module_from_spec(spec)
+spec.loader.exec_module(artifact)
+assert artifact.checksum(archive) == expected, 'Downloaded Actions artifact digest differs'
+run = json.loads(subprocess.check_output(['gh', 'run', 'view', run_id,
+                                         '--json', 'headSha,jobs'], cwd=root))
+assert run['headSha'] == source
+apple = next(job for job in run['jobs'] if job['name'] == 'apple')
+# Staging may overlap cache saving; publication separately requires a green full run.
+assert all(step['conclusion'] == 'success' for step in apple['steps']
+           if not step['name'].startswith('Post ')), apple
+for name in ['Run python3 scripts/swift-artifact.py --check-build',
+             'Run swift test --package-path tests/swift', 'Test iOS app']:
+    assert any(step['name'] == name and step['conclusion'] == 'success' for step in apple['steps']), name
+subprocess.run(['git', 'diff', '--exit-code', source, '--', 'src', 'Cargo.toml', 'Cargo.lock',
+                'boltffi.toml', 'rust-toolchain.toml', '.cargo/config.toml',
+                'scripts/build-sdk.sh', 'sdk/swift-support'], cwd=root, check=True)
+
+with tempfile.TemporaryDirectory(prefix='bark-v0110-ci-') as directory:
+    extracted = Path(directory)
+    with zipfile.ZipFile(archive) as package:
+        for name in package.namelist():
+            path = Path(name)
+            if name.startswith('dist/apple/') and '..' not in path.parts and not name.endswith('/'):
+                destination = extracted / path
+                destination.parent.mkdir(parents=True, exist_ok=True)
+                destination.write_bytes(package.read(name))
+    framework = extracted / 'dist/apple/BarkBoltFFI.xcframework'
+    info = plistlib.loads((framework / 'Info.plist').read_bytes())
+    seen = set()
+    for library in info['AvailableLibraries']:
+        binary = framework / library['LibraryIdentifier'] / library['LibraryPath']
+        output = subprocess.check_output(['xcrun', 'otool', '-arch', 'all', '-l', str(binary)], text=True)
+        command = ''
+        minimums = []
+        for line in output.splitlines():
+            parts = line.split()
+            if len(parts) == 2 and parts[0] == 'cmd':
+                command = parts[1]
+            if len(parts) == 2 and ((command == 'LC_BUILD_VERSION' and parts[0] == 'minos') or
+                (command.startswith('LC_VERSION_MIN_') and parts[0] == 'version')):
+                minimums.append(tuple(int(v) for v in parts[1].split('.')))
+        limit = (13, 0) if library['SupportedPlatform'] == 'macos' else (16, 0)
+        assert minimums and all(value[:2] <= limit for value in minimums)
+        for arch in library['SupportedArchitectures']:
+            seen.add((library['SupportedPlatform'], library.get('SupportedPlatformVariant'), arch))
+    assert seen == set(artifact.TARGETS)
+    local = root / 'dist/apple'
+    if local.exists():
+        shutil.rmtree(local)
+    shutil.copytree(framework.parent, local)
+    framework = local / 'BarkBoltFFI.xcframework'
+    # The hosted check-build step compared all five archives with that run's Cargo outputs.
+    # The authenticated artifact digest above binds those exact files to the successful run.
+    (root / 'dist').mkdir(exist_ok=True)
+    artifact.check_build = lambda: framework
+    artifact.stage()
+    artifact.verify(check_source=True)
+print(json.dumps({'run_id': run_id, 'source': source, 'actions_artifact_sha256': expected,
+                  'xcframework_sha256': artifact.checksum(root / 'dist/BarkBoltFFI.xcframework.zip')}))

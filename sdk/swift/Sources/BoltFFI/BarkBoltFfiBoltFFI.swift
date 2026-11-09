@@ -535,6 +535,49 @@ public struct LightningInvoice: Hashable, Equatable, Sendable {
     }
 }
 
+/// Options for `Wallet::bolt11_invoice_with`, mirroring
+/// `bark::Bolt11InvoiceBuilder`.
+public struct Bolt11InvoiceOptions: Hashable, Equatable, Sendable {
+    /// Embedded in the invoice as its memo.
+    public var description: String?
+    /// Seconds the invoice can be paid for. Defaults to, and cannot exceed,
+    /// the server's invoice expiry; building fails if the server ignores it.
+    public var expirySecs: UInt32?
+    /// Lightning receive token authenticating the later claim, for when the
+    /// wallet owns no spendable VTXO to prove ownership with.
+    public var token: String?
+    /// Ark address the claimed VTXO is forwarded to.
+    public var claimDestination: String?
+
+    public init(
+        description: String? = nil,
+        expirySecs: UInt32? = nil,
+        token: String? = nil,
+        claimDestination: String? = nil
+    ) {
+        self.description = description
+        self.expirySecs = expirySecs
+        self.token = token
+        self.claimDestination = claimDestination
+    }
+
+    @inlinable static func decode(from reader: inout WireReader) -> Bolt11InvoiceOptions {
+        Bolt11InvoiceOptions(
+            description: reader.readOptional { reader in reader.readString() },
+            expirySecs: reader.readOptional { reader in reader.readU32() },
+            token: reader.readOptional { reader in reader.readString() },
+            claimDestination: reader.readOptional { reader in reader.readString() }
+        )
+    }
+
+    @inlinable func encode(to writer: inout WireWriter) {
+        writer.writeOptional(self.description) { writer, boltffiValue0 in writer.writeString(boltffiValue0) }
+        writer.writeOptional(self.expirySecs) { writer, boltffiValue0 in writer.writeU32(boltffiValue0) }
+        writer.writeOptional(self.token) { writer, boltffiValue0 in writer.writeString(boltffiValue0) }
+        writer.writeOptional(self.claimDestination) { writer, boltffiValue0 in writer.writeString(boltffiValue0) }
+    }
+}
+
 /// What an offboard or onchain send broadcast, and its history entry.
 public struct OffboardResult: Hashable, Equatable, Sendable {
     public var txid: String
@@ -2434,6 +2477,199 @@ public struct ExitTransactionPackage: Hashable, Equatable, Sendable {
     }
 }
 
+/// A transaction and its id, mirroring `bark::exit::TransactionInfo`.
+public struct ExitTransaction: Hashable, Equatable, Sendable {
+    public var txid: String
+    /// Consensus-serialized hex.
+    public var txHex: String
+
+    public init(txid: String, txHex: String) {
+        self.txid = txid
+        self.txHex = txHex
+    }
+
+    @inlinable static func decode(from reader: inout WireReader) -> ExitTransaction {
+        ExitTransaction(txid: reader.readString(), txHex: reader.readString())
+    }
+
+    @inlinable func encode(to writer: inout WireWriter) {
+        writer.writeString(self.txid)
+        writer.writeString(self.txHex)
+    }
+}
+
+/// One VTXO's unconfirmed exit transactions, in broadcast order.
+public struct RemainingExit: Hashable, Equatable, Sendable {
+    public var vtxoId: String
+    public var txids: [String]
+
+    public init(vtxoId: String, txids: [String]) {
+        self.vtxoId = vtxoId
+        self.txids = txids
+    }
+
+    @inlinable static func decode(from reader: inout WireReader) -> RemainingExit {
+        RemainingExit(vtxoId: reader.readString(), txids: reader.readArray { reader in reader.readString() })
+    }
+
+    @inlinable func encode(to writer: inout WireWriter) {
+        writer.writeString(self.vtxoId)
+        writer.writeArray(self.txids) { writer, boltffiValue0 in writer.writeString(boltffiValue0) }
+    }
+}
+
+/// Mirrors `bark::exit::RemainingExitTransactions`.
+public struct RemainingExitTransactions: Hashable, Equatable, Sendable {
+    /// One entry per requested VTXO, in request order.
+    public var exits: [RemainingExit]
+    /// Every transaction referenced by `exits` once, parents before children.
+    public var transactions: [ExitTransaction]
+
+    public init(exits: [RemainingExit], transactions: [ExitTransaction]) {
+        self.exits = exits
+        self.transactions = transactions
+    }
+
+    @inlinable static func decode(from reader: inout WireReader) -> RemainingExitTransactions {
+        RemainingExitTransactions(exits: reader.readArray { reader in RemainingExit.decode(from: &reader) }, transactions: reader.readArray { reader in ExitTransaction.decode(from: &reader) })
+    }
+
+    @inlinable func encode(to writer: inout WireWriter) {
+        writer.writeArray(self.exits) { writer, boltffiValue0 in boltffiValue0.encode(to: &writer) }
+        writer.writeArray(self.transactions) { writer, boltffiValue0 in boltffiValue0.encode(to: &writer) }
+    }
+}
+
+/// A signed CPFP child. The exit transaction is zero-fee, so the fee is the
+/// whole package's.
+public struct PresignedExitChild: Hashable, Equatable, Sendable {
+    public var txid: String
+    public var txHex: String
+    public var totalFeeSats: UInt64
+    /// Package fee rate, rounded up.
+    public var feeRateSatPerVb: UInt64
+
+    public init(
+        txid: String,
+        txHex: String,
+        totalFeeSats: UInt64,
+        feeRateSatPerVb: UInt64
+    ) {
+        self.txid = txid
+        self.txHex = txHex
+        self.totalFeeSats = totalFeeSats
+        self.feeRateSatPerVb = feeRateSatPerVb
+    }
+
+    @inlinable static func decode(from reader: inout WireReader) -> PresignedExitChild {
+        PresignedExitChild(
+            txid: reader.readString(),
+            txHex: reader.readString(),
+            totalFeeSats: reader.readU64(),
+            feeRateSatPerVb: reader.readU64()
+        )
+    }
+
+    @inlinable func encode(to writer: inout WireWriter) {
+        writer.writeString(self.txid)
+        writer.writeString(self.txHex)
+        writer.writeU64(self.totalFeeSats)
+        writer.writeU64(self.feeRateSatPerVb)
+    }
+}
+
+/// An `(exit, child)` package, broadcast as one unit.
+public struct PresignedExitPackage: Hashable, Equatable, Sendable {
+    public var vtxoId: String
+    public var exit: ExitTransaction
+    public var child: PresignedExitChild
+
+    public init(vtxoId: String, exit: ExitTransaction, child: PresignedExitChild) {
+        self.vtxoId = vtxoId
+        self.exit = exit
+        self.child = child
+    }
+
+    @inlinable static func decode(from reader: inout WireReader) -> PresignedExitPackage {
+        PresignedExitPackage(vtxoId: reader.readString(), exit: ExitTransaction.decode(from: &reader), child: PresignedExitChild.decode(from: &reader))
+    }
+
+    @inlinable func encode(to writer: inout WireWriter) {
+        writer.writeString(self.vtxoId)
+        self.exit.encode(to: &writer)
+        self.child.encode(to: &writer)
+    }
+}
+
+/// One broadcast step.
+public struct PresignedWave: Hashable, Equatable, Sendable {
+    public var packages: [PresignedExitPackage]
+    /// Exit transactions already in the mempool; they confirm with this
+    /// wave. Only the first wave has any.
+    public var inMempool: [ExitTransaction]
+
+    public init(packages: [PresignedExitPackage], inMempool: [ExitTransaction]) {
+        self.packages = packages
+        self.inMempool = inMempool
+    }
+
+    @inlinable static func decode(from reader: inout WireReader) -> PresignedWave {
+        PresignedWave(packages: reader.readArray { reader in PresignedExitPackage.decode(from: &reader) }, inMempool: reader.readArray { reader in ExitTransaction.decode(from: &reader) })
+    }
+
+    @inlinable func encode(to writer: inout WireWriter) {
+        writer.writeArray(self.packages) { writer, boltffiValue0 in boltffiValue0.encode(to: &writer) }
+        writer.writeArray(self.inMempool) { writer, boltffiValue0 in boltffiValue0.encode(to: &writer) }
+    }
+}
+
+/// The presigned work for one VTXO.
+public struct PresignedExit: Hashable, Equatable, Sendable {
+    public var vtxoId: String
+    public var status: PresignedExitStatus
+    /// The unfunded tail of the chain, in broadcast order. Empty when fully
+    /// signed.
+    public var unsigned: [ExitTransaction]
+
+    public init(vtxoId: String, status: PresignedExitStatus, unsigned: [ExitTransaction]) {
+        self.vtxoId = vtxoId
+        self.status = status
+        self.unsigned = unsigned
+    }
+
+    @inlinable static func decode(from reader: inout WireReader) -> PresignedExit {
+        PresignedExit(vtxoId: reader.readString(), status: PresignedExitStatus.decode(from: &reader), unsigned: reader.readArray { reader in ExitTransaction.decode(from: &reader) })
+    }
+
+    @inlinable func encode(to writer: inout WireWriter) {
+        writer.writeString(self.vtxoId)
+        self.status.encode(to: &writer)
+        writer.writeArray(self.unsigned) { writer, boltffiValue0 in boltffiValue0.encode(to: &writer) }
+    }
+}
+
+/// Mirrors `bark::exit::PresignedExits`: a per-VTXO summary plus the
+/// wave-by-wave broadcast plan.
+public struct PresignedExits: Hashable, Equatable, Sendable {
+    /// One entry per requested VTXO, in request order.
+    public var exits: [PresignedExit]
+    public var waves: [PresignedWave]
+
+    public init(exits: [PresignedExit], waves: [PresignedWave]) {
+        self.exits = exits
+        self.waves = waves
+    }
+
+    @inlinable static func decode(from reader: inout WireReader) -> PresignedExits {
+        PresignedExits(exits: reader.readArray { reader in PresignedExit.decode(from: &reader) }, waves: reader.readArray { reader in PresignedWave.decode(from: &reader) })
+    }
+
+    @inlinable func encode(to writer: inout WireWriter) {
+        writer.writeArray(self.exits) { writer, boltffiValue0 in boltffiValue0.encode(to: &writer) }
+        writer.writeArray(self.waves) { writer, boltffiValue0 in boltffiValue0.encode(to: &writer) }
+    }
+}
+
 /// Stable error categories; messages retain the underlying diagnostic.
 public enum BarkErrorCode: Int32, Hashable, Sendable, CaseIterable {
     case other = 0
@@ -3361,6 +3597,49 @@ public enum RoundOutcome: Int32, Hashable, Sendable, CaseIterable {
 
     @usableFromInline var cValue: Int32 {
         rawValue
+    }
+}
+
+/// Mirrors `bark::exit::PresignedExitStatus`. Waves are 0-based indices
+/// into `PresignedExits::waves`.
+public enum PresignedExitStatus: Hashable, Equatable, Sendable {
+    /// Every package is signed. The broadcast finishes once wave
+    /// `exited_in_wave` confirms; `None` when nothing needs broadcasting.
+    /// Fees total the children over this exit's packages.
+    case fullySigned(exitedInWave: UInt32?, totalFeeSats: UInt64, feeRateSatPerVb: UInt64)
+    /// Confirmed funds ran out: wave `last_wave` holds this exit's last
+    /// signed package and `unsigned` continues after it.
+    case partiallySigned(lastWave: UInt32)
+    /// No package could be funded.
+    case unsigned
+
+    @inlinable static func decode(from reader: inout WireReader) -> PresignedExitStatus {
+        let tag = reader.readU32()
+        switch tag {
+        case 0:
+            return .fullySigned(exitedInWave: reader.readOptional { reader in reader.readU32() }, totalFeeSats: reader.readU64(), feeRateSatPerVb: reader.readU64())
+        case 1:
+            return .partiallySigned(lastWave: reader.readU32())
+        case 2:
+            return .unsigned
+        default:
+            fatalError("Invalid PresignedExitStatus tag: \(tag)")
+        }
+    }
+
+    @inlinable func encode(to writer: inout WireWriter) {
+        switch self {
+        case let .fullySigned(exitedInWave, totalFeeSats, feeRateSatPerVb):
+            writer.writeU32(0)
+            writer.writeOptional(exitedInWave) { writer, boltffiValue0 in writer.writeU32(boltffiValue0) }
+            writer.writeU64(totalFeeSats)
+            writer.writeU64(feeRateSatPerVb)
+        case let .partiallySigned(lastWave):
+            writer.writeU32(1)
+            writer.writeU32(lastWave)
+        case .unsigned:
+            writer.writeU32(2)
+        }
     }
 }
 
@@ -5194,6 +5473,40 @@ public final class Wallet {
         }
     }
 
+    /// Create an invoice with every option `bark::Bolt11InvoiceBuilder`
+    /// offers, including `expirySecs`. See `bolt11InvoiceForAddress` for the
+    /// `claimDestination` trust model.
+    public func bolt11InvoiceWith(amountSats: UInt64, options: Bolt11InvoiceOptions) async throws -> LightningInvoice {
+        let boltffiOptionsBytes = boltffiEncode { boltffiOptionsWriter in options.encode(to: &boltffiOptionsWriter) }
+        let boltffiFuture = boltffiOptionsBytes.withUnsafeBufferPointer { boltffiOptionsBuffer in
+            return boltffi_method_class_bark_bolt_ffi_ffi_wallet_wallet_bolt11_invoice_with(
+                self.handle,
+                amountSats,
+                boltffiOptionsBuffer.baseAddress!,
+                UInt(boltffiOptionsBuffer.count)
+            )
+        }
+        return try await boltffiAsyncCall(
+            futureHandle: boltffiFuture,
+            poll: boltffi_async_method_class_bark_bolt_ffi_ffi_wallet_wallet_bolt11_invoice_with_poll,
+            cancel: boltffi_async_method_class_bark_bolt_ffi_ffi_wallet_wallet_bolt11_invoice_with_cancel,
+            free: boltffi_async_method_class_bark_bolt_ffi_ffi_wallet_wallet_bolt11_invoice_with_free
+        ) { boltffiFuture, boltffiStatus in
+            var boltffiResult: FfiBuf_u8 = FfiBuf_u8()
+            let boltffiError = boltffi_async_method_class_bark_bolt_ffi_ffi_wallet_wallet_bolt11_invoice_with_complete(boltffiFuture, boltffiStatus, &boltffiResult)
+            if boltffiError.ptr != nil || Int(boltffiError.len) != 0 {
+                defer { boltffi_free_buf(boltffiError) }
+                throw boltffiDecodeOwnedBuf(boltffiError.ptr, Int(boltffiError.len)) { boltffiErrorReader in BarkError.decode(from: &boltffiErrorReader) }
+            }
+            let boltffiStatusCode = boltffiStatus!.pointee.code
+            guard boltffiStatusCode == 0 else {
+                throw FfiError(message: "FFI failed in async completion with code \(boltffiStatusCode)")
+            }
+            defer { boltffi_free_buf(boltffiResult) }
+            return boltffiDecodeOwnedBuf(boltffiResult.ptr, Int(boltffiResult.len)) { boltffiReader in LightningInvoice.decode(from: &boltffiReader) }
+        }
+    }
+
     public func tryClaimAllLightningReceives(wait: Bool = false) async throws -> [LightningReceive] {
         let boltffiFuture = boltffi_method_class_bark_bolt_ffi_ffi_wallet_wallet_try_claim_all_lightning_receives(self.handle, wait)
         return try await boltffiAsyncCall(
@@ -6582,6 +6895,85 @@ public final class Wallet {
             guard boltffiStatusCode == 0 else {
                 throw FfiError(message: "FFI failed in async completion with code \(boltffiStatusCode)")
             }
+        }
+    }
+
+    /// Sign, without broadcasting or reserving funds, a CPFP child for every
+    /// exit transaction of `vtxo_ids` that still needs broadcasting, for as
+    /// long as confirmed onchain funds last.
+    ///
+    /// Run the returned plan wave by wave: broadcast all of a wave's
+    /// `(exit, child)` packages together, then wait until they and its
+    /// `inMempool` transactions confirm before the next wave. The plan can be
+    /// run later, from cold storage or by a third party. A later spend from
+    /// the onchain wallet can invalidate the children. The onchain wallet
+    /// reveals the change addresses the children pay to, so one sync finds
+    /// the whole chain once broadcast. Only funds the onchain wallet already
+    /// sees as confirmed are used, so sync it first. Omit the fee rate for
+    /// Bark's default.
+    /// Needs the built-in onchain wallet; a callback wallet fails.
+    public func presignEmergencyExit(vtxoIds: [String], feeRateSatPerVb: UInt64? = nil) async throws -> PresignedExits {
+        let boltffiVtxoIdsBytes = boltffiEncode { boltffiVtxoIdsWriter in boltffiVtxoIdsWriter.writeArray(vtxoIds) { boltffiVtxoIdsWriter, boltffiValue0 in boltffiVtxoIdsWriter.writeString(boltffiValue0) } }
+        let boltffiFuture = boltffiVtxoIdsBytes.withUnsafeBufferPointer { boltffiVtxoIdsBuffer in
+            let boltffiFeeRateSatPerVbBytes = boltffiEncode { boltffiFeeRateSatPerVbWriter in boltffiFeeRateSatPerVbWriter.writeOptional(feeRateSatPerVb) { writer, value in writer.writeU64(value) } }
+            return boltffiFeeRateSatPerVbBytes.withUnsafeBufferPointer { boltffiFeeRateSatPerVbBuffer in
+                return boltffi_method_class_bark_bolt_ffi_ffi_wallet_wallet_presign_emergency_exit(
+                    self.handle,
+                    boltffiVtxoIdsBuffer.baseAddress!,
+                    UInt(boltffiVtxoIdsBuffer.count),
+                    boltffiFeeRateSatPerVbBuffer.baseAddress!,
+                    UInt(boltffiFeeRateSatPerVbBuffer.count)
+                )
+            }
+        }
+        return try await boltffiAsyncCall(
+            futureHandle: boltffiFuture,
+            poll: boltffi_async_method_class_bark_bolt_ffi_ffi_wallet_wallet_presign_emergency_exit_poll,
+            cancel: boltffi_async_method_class_bark_bolt_ffi_ffi_wallet_wallet_presign_emergency_exit_cancel,
+            free: boltffi_async_method_class_bark_bolt_ffi_ffi_wallet_wallet_presign_emergency_exit_free
+        ) { boltffiFuture, boltffiStatus in
+            var boltffiResult: FfiBuf_u8 = FfiBuf_u8()
+            let boltffiError = boltffi_async_method_class_bark_bolt_ffi_ffi_wallet_wallet_presign_emergency_exit_complete(boltffiFuture, boltffiStatus, &boltffiResult)
+            if boltffiError.ptr != nil || Int(boltffiError.len) != 0 {
+                defer { boltffi_free_buf(boltffiError) }
+                throw boltffiDecodeOwnedBuf(boltffiError.ptr, Int(boltffiError.len)) { boltffiErrorReader in BarkError.decode(from: &boltffiErrorReader) }
+            }
+            let boltffiStatusCode = boltffiStatus!.pointee.code
+            guard boltffiStatusCode == 0 else {
+                throw FfiError(message: "FFI failed in async completion with code \(boltffiStatusCode)")
+            }
+            defer { boltffi_free_buf(boltffiResult) }
+            return boltffiDecodeOwnedBuf(boltffiResult.ptr, Int(boltffiResult.len)) { boltffiReader in PresignedExits.decode(from: &boltffiReader) }
+        }
+    }
+
+    /// Every exit transaction of `vtxo_ids` not yet confirmed onchain: per
+    /// VTXO the txids it needs confirmed in broadcast order, plus each
+    /// transaction once, parents before children. Read-only. Statuses are
+    /// from the last exit sync; call `syncExits` first for current ones.
+    public func remainingExitTransactions(vtxoIds: [String]) async throws -> RemainingExitTransactions {
+        let boltffiVtxoIdsBytes = boltffiEncode { boltffiVtxoIdsWriter in boltffiVtxoIdsWriter.writeArray(vtxoIds) { boltffiVtxoIdsWriter, boltffiValue0 in boltffiVtxoIdsWriter.writeString(boltffiValue0) } }
+        let boltffiFuture = boltffiVtxoIdsBytes.withUnsafeBufferPointer { boltffiVtxoIdsBuffer in
+            return boltffi_method_class_bark_bolt_ffi_ffi_wallet_wallet_remaining_exit_transactions(self.handle, boltffiVtxoIdsBuffer.baseAddress!, UInt(boltffiVtxoIdsBuffer.count))
+        }
+        return try await boltffiAsyncCall(
+            futureHandle: boltffiFuture,
+            poll: boltffi_async_method_class_bark_bolt_ffi_ffi_wallet_wallet_remaining_exit_transactions_poll,
+            cancel: boltffi_async_method_class_bark_bolt_ffi_ffi_wallet_wallet_remaining_exit_transactions_cancel,
+            free: boltffi_async_method_class_bark_bolt_ffi_ffi_wallet_wallet_remaining_exit_transactions_free
+        ) { boltffiFuture, boltffiStatus in
+            var boltffiResult: FfiBuf_u8 = FfiBuf_u8()
+            let boltffiError = boltffi_async_method_class_bark_bolt_ffi_ffi_wallet_wallet_remaining_exit_transactions_complete(boltffiFuture, boltffiStatus, &boltffiResult)
+            if boltffiError.ptr != nil || Int(boltffiError.len) != 0 {
+                defer { boltffi_free_buf(boltffiError) }
+                throw boltffiDecodeOwnedBuf(boltffiError.ptr, Int(boltffiError.len)) { boltffiErrorReader in BarkError.decode(from: &boltffiErrorReader) }
+            }
+            let boltffiStatusCode = boltffiStatus!.pointee.code
+            guard boltffiStatusCode == 0 else {
+                throw FfiError(message: "FFI failed in async completion with code \(boltffiStatusCode)")
+            }
+            defer { boltffi_free_buf(boltffiResult) }
+            return boltffiDecodeOwnedBuf(boltffiResult.ptr, Int(boltffiResult.len)) { boltffiReader in RemainingExitTransactions.decode(from: &boltffiReader) }
         }
     }
 
