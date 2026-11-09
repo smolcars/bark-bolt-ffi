@@ -94,6 +94,30 @@ same protected runner pool; accelerated runtime tests stay on Blacksmith.
   ([run 42445168836](https://github.com/smolcars/bark-bolt-ffi/actions/runs/42445168836), code `a57b3c3`).
 - [x] Open [PR #12](https://github.com/smolcars/bark-bolt-ffi/pull/12) with results and remaining limits.
 
+### 32 — Bark 0.8.1: presigned exits, remaining exit transactions, invoice expiry (v0.11.0)
+
+Plan: pin the three Bark crates to lib-0.8.1 (`30368206`). Its persistence and
+stored action formats are unchanged. bdk_wallet 3.2 leaves a reopened
+`OnchainWallet::inner` without keys, so `src/core/prepared_onchain.rs` signs
+prepared sends and boards through `OnchainWalletTrait::sign_psbt` (Bark's
+signers) instead of `inner.sign`. `WalletState` forwards
+`presign_p2a_cpfp_walk` to Bark's wallet under the pending-board reservation;
+the callback wallet keeps Bark's default error. `src/core/wallet.rs` and
+`src/ffi/wallet.rs` add `presign_emergency_exit`, `remaining_exit_transactions`
+(request order instead of Bark's HashMap) and `bolt11_invoice_with`
+(`Bolt11InvoiceBuilder`; the existing invoice methods route through it like
+upstream). `src/types.rs` adds the records and `PresignedExitStatus`. RegTest
+moves to our release-day images (`captaind`/`bark` nightly-2026-11-06, which
+report 0.8.1+30368206) and to a CLN v26.06.10 image with Bark's hold plugin
+revision, since captaind 0.8.1 refuses older CLN. New API, so a minor release.
+
+- [x] Red/green unit test: prepared sends on a reopened wallet failed "not fully signed" after the bump and pass with Bark's signers.
+- [x] Live RegTest Rust test: presign, broadcast and confirm a shared two-VTXO exit plan wave by wave.
+- [x] Live RegTest invoice expiry, Swift and Kotlin contract tests.
+- [ ] Review, PR and CI.
+
+[Execution evidence](validation/bark-081-2026-11-09.md).
+
 ### 31 — Check VTXOs with the server after a restore (v0.10.0)
 
 Plan: Noah restores wallets from encrypted backups of the Bark database. A

@@ -170,7 +170,9 @@ impl OnchainWallet {
         let _operation = gate.lock().await;
         let mut state = self.wallet.write().await;
         let unavailable = state.pending_board_inputs().await?;
-        state.prepare(address, amount, fee_rate, confirmed_only, &unavailable)
+        state
+            .prepare(address, amount, fee_rate, confirmed_only, &unavailable)
+            .await
     }
 
     /// Persist and submit the exact signed transaction; never rebuild or select coins.

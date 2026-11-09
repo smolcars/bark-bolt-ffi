@@ -251,6 +251,15 @@ class NoahP1ContractTest {
                         assertFailsWith<BarkError> { recipient.trustAndAdoptServerVtxoStatus(board.vtxoIds.first()) }
                         assertFailsWith<BarkError> { recipient.trustAndAdoptServerVtxoStatus("invalid") }
                     }
+                    val changeIds = wallet.spendableVtxos().map { it.id }
+                    val remaining = wallet.remainingExitTransactions(changeIds)
+                    assertEquals(changeIds,remaining.exits.map { it.vtxoId })
+                    assertTrue(remaining.transactions.isNotEmpty())
+                    onchain.sync()
+                    val plan = wallet.presignEmergencyExit(changeIds,5uL)
+                    assertEquals(changeIds,plan.exits.map { it.vtxoId })
+                    assertEquals(remaining.transactions.map { it.txid }.sorted(),plan.waves.flatMap { it.packages }.map { it.exit.txid }.sorted())
+                    assertTrue(plan.exits.all { (it.status as PresignedExitStatus.FullySigned).totalFeeSats > 0uL })
                     val arkAddress = wallet.newAddressWithIndex()
                     val parsed = parseArkAddress(arkAddress.address)
                     assertEquals(wallet.peekPublicKey(arkAddress.index),parsed.userPubkey)
@@ -268,6 +277,10 @@ class NoahP1ContractTest {
                     assertTrue(pending.htlcVtxoIds.isEmpty())
                     assertNull(pending.movementId)
                     wallet.cancelLightningReceive(receive.paymentHash)
+                    val custom = wallet.bolt11InvoiceWith(2000uL,Bolt11InvoiceOptions(description="Noah expiry",expirySecs=600u))
+                    assertEquals(2000uL,custom.amountSats)
+                    wallet.cancelLightningReceive(custom.paymentHash)
+                    assertFailsWith<BarkError> { wallet.bolt11InvoiceWith(2000uL,Bolt11InvoiceOptions(expirySecs=49u*3600u)) }
                     val id = wallet.spendableVtxos().first().id
                     wallet.startExitForVtxos(listOf(id))
                     val status = wallet.getExitStatus(id,true,true)!!

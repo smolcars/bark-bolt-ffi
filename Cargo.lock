@@ -51,8 +51,8 @@ checksum = "330a5ed07fa54e4702c9d6c4174f74427fc0ef6e214bbd677ae50a5099946470"
 
 [[package]]
 name = "ark-lib"
-version = "0.8.0"
-source = "git+https://gitlab.com/ark-bitcoin/bark?rev=959a489ff4934b181783b41c7d3ee68d85b95cbf#959a489ff4934b181783b41c7d3ee68d85b95cbf"
+version = "0.8.1"
+source = "git+https://gitlab.com/ark-bitcoin/bark?rev=303682063ed7559b06dcf37c5cb37bb7037b943f#303682063ed7559b06dcf37c5cb37bb7037b943f"
 dependencies = [
  "async-trait",
  "bark-bitcoin-ext",
@@ -137,8 +137,8 @@ checksum = "f2032f911046de80f0a198e0901378627c33f59ea0ac00e363d481118bd70a53"
 
 [[package]]
 name = "bark-bitcoin-ext"
-version = "0.8.0"
-source = "git+https://gitlab.com/ark-bitcoin/bark?rev=959a489ff4934b181783b41c7d3ee68d85b95cbf#959a489ff4934b181783b41c7d3ee68d85b95cbf"
+version = "0.8.1"
+source = "git+https://gitlab.com/ark-bitcoin/bark?rev=303682063ed7559b06dcf37c5cb37bb7037b943f#303682063ed7559b06dcf37c5cb37bb7037b943f"
 dependencies = [
  "async-trait",
  "bdk_bitcoind_rpc",
@@ -155,7 +155,7 @@ dependencies = [
 
 [[package]]
 name = "bark-bolt-ffi"
-version = "0.10.0"
+version = "0.11.0"
 dependencies = [
  "anyhow",
  "ark-lib",
@@ -183,8 +183,8 @@ dependencies = [
 
 [[package]]
 name = "bark-common"
-version = "0.8.0"
-source = "git+https://gitlab.com/ark-bitcoin/bark?rev=959a489ff4934b181783b41c7d3ee68d85b95cbf#959a489ff4934b181783b41c7d3ee68d85b95cbf"
+version = "0.8.1"
+source = "git+https://gitlab.com/ark-bitcoin/bark?rev=303682063ed7559b06dcf37c5cb37bb7037b943f#303682063ed7559b06dcf37c5cb37bb7037b943f"
 dependencies = [
  "anyhow",
  "serde",
@@ -193,8 +193,8 @@ dependencies = [
 
 [[package]]
 name = "bark-runtime"
-version = "0.8.0"
-source = "git+https://gitlab.com/ark-bitcoin/bark?rev=959a489ff4934b181783b41c7d3ee68d85b95cbf#959a489ff4934b181783b41c7d3ee68d85b95cbf"
+version = "0.8.1"
+source = "git+https://gitlab.com/ark-bitcoin/bark?rev=303682063ed7559b06dcf37c5cb37bb7037b943f#303682063ed7559b06dcf37c5cb37bb7037b943f"
 dependencies = [
  "futures",
  "gloo-timers",
@@ -206,8 +206,8 @@ dependencies = [
 
 [[package]]
 name = "bark-server-rpc"
-version = "0.8.0"
-source = "git+https://gitlab.com/ark-bitcoin/bark?rev=959a489ff4934b181783b41c7d3ee68d85b95cbf#959a489ff4934b181783b41c7d3ee68d85b95cbf"
+version = "0.8.1"
+source = "git+https://gitlab.com/ark-bitcoin/bark?rev=303682063ed7559b06dcf37c5cb37bb7037b943f#303682063ed7559b06dcf37c5cb37bb7037b943f"
 dependencies = [
  "ark-lib",
  "bitcoin",
@@ -224,8 +224,8 @@ dependencies = [
 
 [[package]]
 name = "bark-wallet"
-version = "0.8.0"
-source = "git+https://gitlab.com/ark-bitcoin/bark?rev=959a489ff4934b181783b41c7d3ee68d85b95cbf#959a489ff4934b181783b41c7d3ee68d85b95cbf"
+version = "0.8.1"
+source = "git+https://gitlab.com/ark-bitcoin/bark?rev=303682063ed7559b06dcf37c5cb37bb7037b943f#303682063ed7559b06dcf37c5cb37bb7037b943f"
 dependencies = [
  "anyhow",
  "ark-lib",
@@ -325,6 +325,12 @@ dependencies = [
 ]
 
 [[package]]
+name = "bdk_coin_select"
+version = "0.4.1"
+source = "registry+https://github.com/rust-lang/crates.io-index"
+checksum = "43064fa3dd1d3a8b24079cfcb5ede6b785857edc782277f17a1736511ccc1916"
+
+[[package]]
 name = "bdk_core"
 version = "0.6.3"
 source = "registry+https://github.com/rust-lang/crates.io-index"
@@ -348,12 +354,25 @@ dependencies = [
 ]
 
 [[package]]
-name = "bdk_wallet"
-version = "3.1.0"
+name = "bdk_tx"
+version = "0.2.0"
 source = "registry+https://github.com/rust-lang/crates.io-index"
-checksum = "1284fb23acc3e3022673712b55f4d5ce7e38aadc2c49bbef830dc3935f0a3289"
+checksum = "40406c9952f15ed30893826bd83b7d67b6bf11d56574c1efc3db3a5d70cdfcea"
+dependencies = [
+ "bdk_coin_select",
+ "miniscript",
+ "rand 0.8.8",
+ "rand_core 0.6.4",
+]
+
+[[package]]
+name = "bdk_wallet"
+version = "3.2.0"
+source = "registry+https://github.com/rust-lang/crates.io-index"
+checksum = "163ec032e0a5a795ded2a7e47fc40a887c75743326483147e4465159c53abdc4"
 dependencies = [
  "bdk_chain",
+ "bdk_tx",
  "bitcoin",
  "miniscript",
  "rand_core 0.6.4",
@@ -370,9 +389,8 @@ checksum = "32637268377fc7b10a8c6d51de3e7fba1ce5dd371a96e342b34e6078db558e7f"
 [[package]]
 name = "bip321"
 version = "0.4.0"
-source = "git+https://gitlab.com/ark-bitcoin/bark?rev=959a489ff4934b181783b41c7d3ee68d85b95cbf#959a489ff4934b181783b41c7d3ee68d85b95cbf"
+source = "git+https://gitlab.com/ark-bitcoin/bark?rev=303682063ed7559b06dcf37c5cb37bb7037b943f#303682063ed7559b06dcf37c5cb37bb7037b943f"
 dependencies = [
- "bark-bitcoin-ext",
  "bitcoin",
  "lightning",
  "lightning-invoice",
@@ -634,8 +652,6 @@ source = "registry+https://github.com/rust-lang/crates.io-index"
 checksum = "005ec2760ca554fae18df7a11195552ec576cd665632a881bc011d5bb2fd4d80"
 dependencies = [
  "find-msvc-tools",
- "jobserver",
- "libc",
  "shlex",
 ]
 
@@ -1545,16 +1561,6 @@ name = "itoa"
 version = "1.0.18"
 source = "registry+https://github.com/rust-lang/crates.io-index"
 checksum = "8f42a60cbdf9a97f5d2305f08a87dc4e09308d1276d28c869c684d7777685682"
-
-[[package]]
-name = "jobserver"
-version = "0.1.35"
-source = "registry+https://github.com/rust-lang/crates.io-index"
-checksum = "1c00acbd29eabad4a2392fa0e921c874934dbbf4194312ad20f04a0ed67a3cb3"
-dependencies = [
- "getrandom 0.4.3",
- "libc",
-]
 
 [[package]]
 name = "js-sys"
@@ -3048,7 +3054,6 @@ dependencies = [
  "tower-service",
  "tracing",
  "webpki-roots",
- "zstd",
 ]
 
 [[package]]
@@ -3756,31 +3761,3 @@ name = "zmij"
 version = "1.0.23"
 source = "registry+https://github.com/rust-lang/crates.io-index"
 checksum = "29666d0abbfad1e3dc4dcf6144730dd3a3ab225bbbdac83319345b1b44ccfc1b"
-
-[[package]]
-name = "zstd"
-version = "0.13.3"
-source = "registry+https://github.com/rust-lang/crates.io-index"
-checksum = "e91ee311a569c327171651566e07972200e76fcfe2242a4fa446149a3881c08a"
-dependencies = [
- "zstd-safe",
-]
-
-[[package]]
-name = "zstd-safe"
-version = "7.3.0"
-source = "registry+https://github.com/rust-lang/crates.io-index"
-checksum = "64d80649ab6db9d9f6f9c80a40becd948eda4714a0a5ac8c4d157a32231c7882"
-dependencies = [
- "zstd-sys",
-]
-
-[[package]]
-name = "zstd-sys"
-version = "2.1.0+zstd.1.5.7"
-source = "registry+https://github.com/rust-lang/crates.io-index"
-checksum = "0ef0a8027ec3ee71300ab3bcbcd0393f434aa72b91ca6d635a39941deae8eea0"
-dependencies = [
- "cc",
- "pkg-config",
-]

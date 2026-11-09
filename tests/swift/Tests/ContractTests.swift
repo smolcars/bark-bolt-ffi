@@ -274,6 +274,18 @@ extension ContractTests {
             do { _ = try await recipient.trustAndAdoptServerVtxoStatus(vtxoId: boardVtxo); XCTFail("Expected foreign VTXO error") } catch is BarkError {}
             do { _ = try await recipient.trustAndAdoptServerVtxoStatus(vtxoId: "invalid"); XCTFail("Expected invalid id") } catch is BarkError {}
         }
+        let changeIds = try await wallet.spendableVtxos().map(\.id)
+        let remaining = try await wallet.remainingExitTransactions(vtxoIds: changeIds)
+        XCTAssertEqual(remaining.exits.map(\.vtxoId), changeIds)
+        XCTAssertFalse(remaining.transactions.isEmpty)
+        _ = try await onchain.sync()
+        let plan = try await wallet.presignEmergencyExit(vtxoIds: changeIds, feeRateSatPerVb: 5)
+        XCTAssertEqual(plan.exits.map(\.vtxoId), changeIds)
+        XCTAssertEqual(plan.waves.flatMap(\.packages).map(\.exit.txid).sorted(), remaining.transactions.map(\.txid).sorted())
+        for exit in plan.exits {
+            guard case .fullySigned(_, let fee, _) = exit.status else { return XCTFail("Expected a fully signed exit") }
+            XCTAssertGreaterThan(fee, 0)
+        }
         let arkAddress = try await wallet.newAddressWithIndex()
         let parsed = try parseArkAddress(address: arkAddress.address)
         let key = try await wallet.peekPublicKey(index: arkAddress.index)
@@ -294,6 +306,10 @@ extension ContractTests {
         XCTAssertTrue(pending.htlcVtxoIds.isEmpty)
         XCTAssertNil(pending.movementId)
         try await wallet.cancelLightningReceive(paymentHash: invoice.paymentHash)
+        let custom = try await wallet.bolt11InvoiceWith(amountSats: 2000, options: Bolt11InvoiceOptions(description: "Noah expiry", expirySecs: 600))
+        XCTAssertEqual(custom.amountSats, 2000)
+        try await wallet.cancelLightningReceive(paymentHash: custom.paymentHash)
+        do { _ = try await wallet.bolt11InvoiceWith(amountSats: 2000, options: Bolt11InvoiceOptions(expirySecs: 49 * 3600)); XCTFail("Expected the server to cap expiry") } catch is BarkError {}
         let id = try XCTUnwrap(board.vtxoIds.first)
         try await wallet.startExitForVtxos(vtxoIds: [id])
         let possible = try await wallet.getExitStatus(vtxoId: id, includeHistory: true, includeTransactions: true)

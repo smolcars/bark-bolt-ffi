@@ -259,6 +259,13 @@
     },
     {
       "owner": "Wallet",
+      "name": "bolt11_invoice_with",
+      "async": true,
+      "signature": "pub async fn bolt11_invoice_with( &self, amount_sats: u64, options: types::Bolt11InvoiceOptions, ) -> Result<types::LightningInvoice, BarkError>",
+      "source": "src/ffi/wallet.rs"
+    },
+    {
+      "owner": "Wallet",
       "name": "try_claim_all_lightning_receives",
       "async": true,
       "signature": "pub async fn try_claim_all_lightning_receives( &self, wait: bool, ) -> Result<Vec<types::LightningReceive>, Error>",
@@ -575,6 +582,20 @@
       "signature": "pub async fn start_exit_for_vtxos_including_non_standard( &self, vtxo_ids: Vec<String>, ) -> Result<(), Error>",
       "source": "src/muniffi/wallet.rs",
       "line": 755
+    },
+    {
+      "owner": "Wallet",
+      "name": "presign_emergency_exit",
+      "async": true,
+      "signature": "pub async fn presign_emergency_exit( &self, vtxo_ids: Vec<String>, fee_rate_sat_per_vb: Option<u64>, ) -> Result<types::PresignedExits, BarkError>",
+      "source": "src/ffi/wallet.rs"
+    },
+    {
+      "owner": "Wallet",
+      "name": "remaining_exit_transactions",
+      "async": true,
+      "signature": "pub async fn remaining_exit_transactions( &self, vtxo_ids: Vec<String>, ) -> Result<types::RemainingExitTransactions, BarkError>",
+      "source": "src/ffi/wallet.rs"
     },
     {
       "owner": "Wallet",
@@ -1546,6 +1567,42 @@
     {
       "name": "ExcludedExitVtxo",
       "source": "src/types.rs"
+    },
+    {
+      "name": "Bolt11InvoiceOptions",
+      "source": "src/types.rs"
+    },
+    {
+      "name": "ExitTransaction",
+      "source": "src/types.rs"
+    },
+    {
+      "name": "RemainingExit",
+      "source": "src/types.rs"
+    },
+    {
+      "name": "RemainingExitTransactions",
+      "source": "src/types.rs"
+    },
+    {
+      "name": "PresignedExitChild",
+      "source": "src/types.rs"
+    },
+    {
+      "name": "PresignedExitPackage",
+      "source": "src/types.rs"
+    },
+    {
+      "name": "PresignedWave",
+      "source": "src/types.rs"
+    },
+    {
+      "name": "PresignedExit",
+      "source": "src/types.rs"
+    },
+    {
+      "name": "PresignedExits",
+      "source": "src/types.rs"
     }
   ],
   "enums": [
@@ -1644,6 +1701,10 @@
     {
       "name": "VtxoInFlightState",
       "source": "src/types.rs"
+    },
+    {
+      "name": "PresignedExitStatus",
+      "source": "src/types.rs"
     }
   ],
   "callbacks": [
@@ -1669,7 +1730,7 @@
       ]
     }
   ],
-  "bark_revision": "959a489ff4934b181783b41c7d3ee68d85b95cbf",
+  "bark_revision": "303682063ed7559b06dcf37c5cb37bb7037b943f",
   "nitro_reference": "v0.0.144 (10bcf3ec9325696601de10f833fab747f0a5ec4c)",
   "field_contracts": {
     "StoredPublicKey": [

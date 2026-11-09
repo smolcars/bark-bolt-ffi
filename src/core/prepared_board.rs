@@ -114,7 +114,9 @@ impl Wallet {
         unavailable.extend(excluded_outpoints.iter().filter_map(|point| {
             Some(bitcoin::OutPoint::new(point.txid.parse().ok()?, point.vout))
         }));
-        let prepared = state.prepare(address, amount, fee_rate, confirmed_only, &unavailable)?;
+        let prepared = state
+            .prepare(address, amount, fee_rate, confirmed_only, &unavailable)
+            .await?;
         // Failures after coin selection must release their process-local locks too.
         let checked = (|| {
             // Pinned server-rpc::MAX_NB_BOARD_FUNDING_INPUTS; Bark checks it again at submit.
