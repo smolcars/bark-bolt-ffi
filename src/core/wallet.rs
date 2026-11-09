@@ -782,16 +782,15 @@ impl Wallet {
         description: Option<String>,
         token: Option<String>,
     ) -> Result<types::LightningInvoice, BarkError> {
-        let amount = bitcoin::Amount::from_sat(amount_sats);
-        let invoice = self
-            .inner
-            .bolt11_invoice(amount, description, token)
-            .await?;
-        Ok(types::LightningInvoice {
-            invoice: invoice.to_string(),
-            payment_hash: invoice.payment_hash().to_string(),
+        self.bolt11_invoice_with(
             amount_sats,
-        })
+            types::Bolt11InvoiceOptions {
+                description,
+                token,
+                ..Default::default()
+            },
+        )
+        .await
     }
 
     /// Create an invoice whose claimed VTXO is delivered to `claim_destination`
@@ -816,11 +815,41 @@ impl Wallet {
         description: Option<String>,
         token: Option<String>,
     ) -> Result<types::LightningInvoice, BarkError> {
-        let addr: ark::Address = claim_destination.parse().context("invalid ark address")?;
-        let amount = bitcoin::Amount::from_sat(amount_sats);
+        self.bolt11_invoice_with(
+            amount_sats,
+            types::Bolt11InvoiceOptions {
+                description,
+                token,
+                claim_destination: Some(claim_destination),
+                ..Default::default()
+            },
+        )
+        .await
+    }
+
+    /// Mint an invoice through `bark::Wallet::bolt11_invoice_builder`.
+    pub async fn bolt11_invoice_with(
+        &self,
+        amount_sats: u64,
+        options: types::Bolt11InvoiceOptions,
+    ) -> Result<types::LightningInvoice, BarkError> {
+        let claim_destination = options
+            .claim_destination
+            .map(|addr| addr.parse::<ark::Address>().context("invalid ark address"))
+            .transpose()?;
         let invoice = self
             .inner
-            .bolt11_invoice_for_address(amount, addr, description, token)
+            .bolt11_invoice_builder()
+            .amount(bitcoin::Amount::from_sat(amount_sats))
+            .description(options.description)
+            .expiry(
+                options
+                    .expiry_secs
+                    .map(|secs| std::time::Duration::from_secs(secs.into())),
+            )
+            .token(options.token)
+            .claim_destination(claim_destination)
+            .build()
             .await?;
         Ok(types::LightningInvoice {
             invoice: invoice.to_string(),
@@ -967,13 +996,11 @@ impl Wallet {
             |message: String| BarkError::typed(BarkErrorCode::InvalidPaymentRequest, message);
         // Read the network first, so only parsing failures get the typed code.
         self.inner.network().await?;
-        // Upstream unwraps BOLT12 offer amounts, which panics on fiat-priced offers.
+        // Upstream debug-asserts that a parsed request has an option.
         let parsed = std::panic::AssertUnwindSafe(self.inner.parse_payment_request(input.trim()))
             .catch_unwind()
             .await
-            .map_err(|_| {
-                invalid("unsupported payment request (fiat-priced BOLT12 offer?)".into())
-            })?;
+            .map_err(|_| invalid("unsupported payment request".into()))?;
         let request = parsed.map_err(|e| invalid(format!("{e:#}")))?;
         if request.options.is_empty() {
             return Err(invalid(
@@ -1605,6 +1632,59 @@ impl Wallet {
 
         info!("[EXIT] Exit initiated for {} VTXOs", vtxo_ids.len());
         Ok(())
+    }
+
+    /// Sign, without broadcasting or reserving funds, a CPFP child for every
+    /// exit transaction of `vtxo_ids` still needing broadcast, for as long as
+    /// confirmed onchain funds last. Reveals the change addresses the children
+    /// pay to. `None` uses Bark's default exit fee rate.
+    pub async fn presign_emergency_exit(
+        &self,
+        vtxo_ids: Vec<String>,
+        fee_rate_sat_per_vb: Option<u64>,
+    ) -> Result<types::PresignedExits, BarkError> {
+        let ids = parse_vtxo_ids(&vtxo_ids)?;
+        let fee_rate = fee_rate_sat_per_vb
+            .map(super::prepared_onchain::fee_rate)
+            .transpose()?;
+        let presigned = self
+            .inner
+            .presign_emergency_exit(&ids, fee_rate)
+            .await
+            .map_err(|error| crate::error::exit_error(&error))?;
+        Ok(presigned.into())
+    }
+
+    /// Every exit transaction of `vtxo_ids` not yet confirmed onchain, as of
+    /// the last exit sync. Read-only: signs nothing, never touches the onchain
+    /// wallet.
+    pub async fn remaining_exit_transactions(
+        &self,
+        vtxo_ids: Vec<String>,
+    ) -> Result<types::RemainingExitTransactions, BarkError> {
+        let ids = parse_vtxo_ids(&vtxo_ids)?;
+        let mut remaining = self
+            .inner
+            .remaining_exit_transactions(&ids)
+            .await
+            .map_err(|error| crate::error::exit_error(&error))?;
+        // Upstream keys by VTXO in a HashMap; answer in request order instead.
+        let exits = ids
+            .iter()
+            .filter_map(|id| {
+                remaining
+                    .exits
+                    .remove(id)
+                    .map(|txids| types::RemainingExit {
+                        vtxo_id: id.to_string(),
+                        txids: txids.iter().map(ToString::to_string).collect(),
+                    })
+            })
+            .collect();
+        Ok(types::RemainingExitTransactions {
+            exits,
+            transactions: remaining.transactions.iter().map(Into::into).collect(),
+        })
     }
 
     /// Like [`Self::start_exit_for_vtxos`], but skips dust and standardness

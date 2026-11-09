@@ -106,12 +106,16 @@ fn live_payment_requests_lightning_options_and_movement_ids() {
             [PaymentMethodParsingError::NetworkMismatch]
         );
         assert!(mainnet.default_option.is_none());
-        // Upstream panics on fiat-priced BOLT12 offers; the wrapper reports them.
+        // Since Bark 0.8.1 a fiat-priced BOLT12 offer parses with an unknown amount.
         let usd_offer = "lno1qcp4256ypqpq86q2qe3k7enxv4j3vggz0xlxvlhemja6c4dqv22uapctqupfhlxm9h8z3k2e72q4k9hcz7vq";
-        for input in [usd_offer, "bitcoin:?sp=x"] {
-            let error = wallet.parse_payment_request(input.into()).await.unwrap_err();
-            assert_eq!(error.code, BarkErrorCode::InvalidPaymentRequest, "{input}");
-        }
+        let offer = wallet.parse_payment_request(usd_offer.into()).await.unwrap();
+        assert_eq!(offer.amount_sats, None);
+        assert!(offer.options[0].requires_amount);
+        let error = wallet
+            .parse_payment_request("bitcoin:?sp=x".into())
+            .await
+            .unwrap_err();
+        assert_eq!(error.code, BarkErrorCode::InvalidPaymentRequest);
 
         // Ark: send_payment and send_arkoor_payment both return their history entry.
         let target = recipient.new_address().await.unwrap();

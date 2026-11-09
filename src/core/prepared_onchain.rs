@@ -275,7 +275,7 @@ impl WalletState {
         }
     }
 
-    pub fn prepare(
+    pub async fn prepare(
         &mut self,
         address: Address,
         amount: OnchainSendAmount,
@@ -315,21 +315,17 @@ impl WalletState {
                 builder.drain_wallet().drain_to(script.clone());
             }
         }
-        let mut psbt = builder.finish().map_err(|error| {
+        let psbt = builder.finish().map_err(|error| {
             BarkError::typed(construction_error_code(&error), error.to_string())
         })?;
         let fee_sats = psbt
             .fee()
             .context("prepared transaction fee is unavailable")?
             .to_sat();
-        let finalized = self
-            .wallet
-            .inner
-            .sign(&mut psbt, bdk_wallet::SignOptions::default())
+        // bdk_wallet 3.2: only Bark's own signers hold keys; it errors unless finalized.
+        let psbt = OnchainWalletTrait::sign_psbt(&mut self.wallet, psbt)
+            .await
             .context("failed to sign prepared transaction")?;
-        finalized
-            .then_some(())
-            .context("prepared transaction was not fully signed")?;
         let transaction = psbt
             .clone()
             .extract_tx()
@@ -461,6 +457,22 @@ impl OnchainWalletTrait for WalletState {
             .make_signed_p2a_cpfp(transaction, fees)
             .await
     }
+    async fn presign_p2a_cpfp_walk(
+        &mut self,
+        exits: &[Vec<(Transaction, MakeCpfpFees)>],
+        relayed: &[Txid],
+    ) -> Result<Vec<Vec<(Transaction, Amount)>>, CpfpError> {
+        // Children must not plan to spend coins a pending board already uses.
+        let guard = self
+            .reserve_pending_boards()
+            .await
+            .map_err(|error| CpfpError::StoreError(error.to_string()))?;
+        guard
+            .state
+            .wallet
+            .presign_p2a_cpfp_walk(exits, relayed)
+            .await
+    }
     async fn store_signed_p2a_cpfp(&mut self, transaction: &Transaction) -> Result<(), CpfpError> {
         self.check_inputs(transaction)
             .map_err(|error| CpfpError::StoreError(error.to_string()))?;
@@ -531,6 +543,10 @@ mod tests {
         db.store_bdk_wallet_changeset(&wallet.take_staged().unwrap())
             .await
             .unwrap();
+        // Apps always reload; since bdk_wallet 3.2 a reloaded `inner` holds no keys.
+        let wallet = OnchainWallet::load_or_create(bitcoin::Network::Regtest, seed, db.clone())
+            .await
+            .unwrap();
         let registration =
             crate::backup::register_live_database(&directory.path().join("db.sqlite")).unwrap();
         let state = WalletState {
@@ -579,6 +595,7 @@ mod tests {
                     true,
                     &[],
                 )
+                .await
                 .unwrap();
             assert!(prepared.inputs.len() > 10);
             let tx = state.prepared[&prepared.id].transaction.clone();
@@ -623,6 +640,7 @@ mod tests {
                     true,
                     &[],
                 )
+                .await
                 .unwrap_err();
             assert_eq!(error.code, BarkErrorCode::InsufficientFunds);
             state.prepared.remove(&prepared.id);
@@ -636,6 +654,7 @@ mod tests {
                     true,
                     &[],
                 )
+                .await
                 .unwrap();
             assert_eq!(drain.amount_sats + drain.fee_sats, 120_000);
             assert_eq!(state.prepared[&drain.id].transaction.output.len(), 1);
@@ -660,6 +679,7 @@ mod tests {
                         true,
                         &[],
                     )
+                    .await
                     .unwrap_err();
                 assert_eq!(error.code, code);
                 assert!(state.prepared.is_empty());
@@ -681,6 +701,7 @@ mod tests {
                     true,
                     &[],
                 )
+                .await
                 .unwrap();
             let tx = state.prepared[&prepared.id].transaction.clone();
             state.record_prepared(&tx).await.unwrap();

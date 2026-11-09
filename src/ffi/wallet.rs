@@ -510,6 +510,18 @@ impl Wallet {
         .await
     }
 
+    /// Create an invoice with every option `bark::Bolt11InvoiceBuilder`
+    /// offers, including `expirySecs`. See `bolt11InvoiceForAddress` for the
+    /// `claimDestination` trust model.
+    pub async fn bolt11_invoice_with(
+        &self,
+        amount_sats: u64,
+        options: types::Bolt11InvoiceOptions,
+    ) -> Result<types::LightningInvoice, BarkError> {
+        self.run(|core| async move { core.bolt11_invoice_with(amount_sats, options).await })
+            .await
+    }
+
     pub async fn try_claim_all_lightning_receives(
         &self,
         #[boltffi::default(false)] wait: bool,
@@ -1007,6 +1019,44 @@ impl Wallet {
                 .await
         })
         .await
+    }
+
+    /// Sign, without broadcasting or reserving funds, a CPFP child for every
+    /// exit transaction of `vtxo_ids` that still needs broadcasting, for as
+    /// long as confirmed onchain funds last.
+    ///
+    /// Run the returned plan wave by wave: broadcast all of a wave's
+    /// `(exit, child)` packages together, then wait until they and its
+    /// `inMempool` transactions confirm before the next wave. The plan can be
+    /// run later, from cold storage or by a third party. A later spend from
+    /// the onchain wallet can invalidate the children. The onchain wallet
+    /// reveals the change addresses the children pay to, so one sync finds
+    /// the whole chain once broadcast. Only funds the onchain wallet already
+    /// sees as confirmed are used, so sync it first. Omit the fee rate for
+    /// Bark's default.
+    /// Needs the built-in onchain wallet; a callback wallet fails.
+    pub async fn presign_emergency_exit(
+        &self,
+        vtxo_ids: Vec<String>,
+        #[boltffi::default(None)] fee_rate_sat_per_vb: Option<u64>,
+    ) -> Result<types::PresignedExits, BarkError> {
+        self.run(|core| async move {
+            core.presign_emergency_exit(vtxo_ids, fee_rate_sat_per_vb)
+                .await
+        })
+        .await
+    }
+
+    /// Every exit transaction of `vtxo_ids` not yet confirmed onchain: per
+    /// VTXO the txids it needs confirmed in broadcast order, plus each
+    /// transaction once, parents before children. Read-only. Statuses are
+    /// from the last exit sync; call `syncExits` first for current ones.
+    pub async fn remaining_exit_transactions(
+        &self,
+        vtxo_ids: Vec<String>,
+    ) -> Result<types::RemainingExitTransactions, BarkError> {
+        self.run(|core| async move { core.remaining_exit_transactions(vtxo_ids).await })
+            .await
     }
 
     /// Cancel a unilateral exit still in its abortable window.

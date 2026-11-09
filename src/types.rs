@@ -356,6 +356,27 @@ pub struct LightningInvoice {
     pub amount_sats: u64,
 }
 
+/// Options for `Wallet::bolt11_invoice_with`, mirroring
+/// `bark::Bolt11InvoiceBuilder`.
+#[derive(Clone, Debug, Default, Serialize, Deserialize)]
+#[boltffi::data]
+pub struct Bolt11InvoiceOptions {
+    /// Embedded in the invoice as its memo.
+    #[boltffi::default(None)]
+    pub description: Option<String>,
+    /// Seconds the invoice can be paid for. Defaults to, and cannot exceed,
+    /// the server's invoice expiry; building fails if the server ignores it.
+    #[boltffi::default(None)]
+    pub expiry_secs: Option<u32>,
+    /// Lightning receive token authenticating the later claim, for when the
+    /// wallet owns no spendable VTXO to prove ownership with.
+    #[boltffi::default(None)]
+    pub token: Option<String>,
+    /// Ark address the claimed VTXO is forwarded to.
+    #[boltffi::default(None)]
+    pub claim_destination: Option<String>,
+}
+
 // ============================================================================
 // OffboardResult
 // ============================================================================
@@ -3001,5 +3022,175 @@ mod balance_contract_tests {
             ],
             [11, 23, 37, 41, 53, 67, 71, 83, 97]
         );
+    }
+}
+
+// ============================================================================
+// Presigned emergency exits and remaining exit transactions
+// ============================================================================
+
+/// A transaction and its id, mirroring `bark::exit::TransactionInfo`.
+#[derive(Clone, Debug, Serialize, Deserialize, PartialEq, Eq)]
+#[boltffi::data]
+pub struct ExitTransaction {
+    pub txid: String,
+    /// Consensus-serialized hex.
+    pub tx_hex: String,
+}
+
+impl From<&bark::exit::TransactionInfo> for ExitTransaction {
+    fn from(info: &bark::exit::TransactionInfo) -> Self {
+        Self {
+            txid: info.txid.to_string(),
+            tx_hex: bitcoin::consensus::encode::serialize_hex(&info.tx),
+        }
+    }
+}
+
+/// One VTXO's unconfirmed exit transactions, in broadcast order.
+#[derive(Clone, Debug, Serialize, Deserialize, PartialEq, Eq)]
+#[boltffi::data]
+pub struct RemainingExit {
+    pub vtxo_id: String,
+    pub txids: Vec<String>,
+}
+
+/// Mirrors `bark::exit::RemainingExitTransactions`.
+#[derive(Clone, Debug, Serialize, Deserialize, PartialEq, Eq)]
+#[boltffi::data]
+pub struct RemainingExitTransactions {
+    /// One entry per requested VTXO, in request order.
+    pub exits: Vec<RemainingExit>,
+    /// Every transaction referenced by `exits` once, parents before children.
+    pub transactions: Vec<ExitTransaction>,
+}
+
+/// Mirrors `bark::exit::PresignedExitStatus`. Waves are 0-based indices
+/// into `PresignedExits::waves`.
+#[derive(Clone, Debug, Serialize, Deserialize, PartialEq, Eq)]
+#[serde(tag = "type", rename_all = "kebab-case")]
+#[boltffi::data]
+pub enum PresignedExitStatus {
+    /// Every package is signed. The broadcast finishes once wave
+    /// `exited_in_wave` confirms; `None` when nothing needs broadcasting.
+    /// Fees total the children over this exit's packages.
+    FullySigned {
+        exited_in_wave: Option<u32>,
+        total_fee_sats: u64,
+        fee_rate_sat_per_vb: u64,
+    },
+    /// Confirmed funds ran out: wave `last_wave` holds this exit's last
+    /// signed package and `unsigned` continues after it.
+    PartiallySigned { last_wave: u32 },
+    /// No package could be funded.
+    Unsigned,
+}
+
+/// A signed CPFP child. The exit transaction is zero-fee, so the fee is the
+/// whole package's.
+#[derive(Clone, Debug, Serialize, Deserialize, PartialEq, Eq)]
+#[boltffi::data]
+pub struct PresignedExitChild {
+    pub txid: String,
+    pub tx_hex: String,
+    pub total_fee_sats: u64,
+    /// Package fee rate, rounded up.
+    pub fee_rate_sat_per_vb: u64,
+}
+
+/// An `(exit, child)` package, broadcast as one unit.
+#[derive(Clone, Debug, Serialize, Deserialize, PartialEq, Eq)]
+#[boltffi::data]
+pub struct PresignedExitPackage {
+    pub vtxo_id: String,
+    pub exit: ExitTransaction,
+    pub child: PresignedExitChild,
+}
+
+/// One broadcast step.
+#[derive(Clone, Debug, Serialize, Deserialize, PartialEq, Eq)]
+#[boltffi::data]
+pub struct PresignedWave {
+    pub packages: Vec<PresignedExitPackage>,
+    /// Exit transactions already in the mempool; they confirm with this
+    /// wave. Only the first wave has any.
+    pub in_mempool: Vec<ExitTransaction>,
+}
+
+/// The presigned work for one VTXO.
+#[derive(Clone, Debug, Serialize, Deserialize, PartialEq, Eq)]
+#[boltffi::data]
+pub struct PresignedExit {
+    pub vtxo_id: String,
+    pub status: PresignedExitStatus,
+    /// The unfunded tail of the chain, in broadcast order. Empty when fully
+    /// signed.
+    pub unsigned: Vec<ExitTransaction>,
+}
+
+/// Mirrors `bark::exit::PresignedExits`: a per-VTXO summary plus the
+/// wave-by-wave broadcast plan.
+#[derive(Clone, Debug, Serialize, Deserialize, PartialEq, Eq)]
+#[boltffi::data]
+pub struct PresignedExits {
+    /// One entry per requested VTXO, in request order.
+    pub exits: Vec<PresignedExit>,
+    pub waves: Vec<PresignedWave>,
+}
+
+impl From<bark::exit::PresignedExits> for PresignedExits {
+    fn from(p: bark::exit::PresignedExits) -> Self {
+        use bark::exit::PresignedExitStatus as S;
+        Self {
+            exits: p
+                .exits
+                .iter()
+                .map(|exit| PresignedExit {
+                    vtxo_id: exit.vtxo_id.to_string(),
+                    status: match exit.status {
+                        S::FullySigned {
+                            exited_in_wave,
+                            fee_info,
+                        } => PresignedExitStatus::FullySigned {
+                            exited_in_wave: exited_in_wave.map(|wave| wave as u32),
+                            total_fee_sats: fee_info.total_fee.to_sat(),
+                            fee_rate_sat_per_vb: fee_info.fee_rate.to_sat_per_vb_ceil(),
+                        },
+                        S::PartiallySigned { last_wave } => PresignedExitStatus::PartiallySigned {
+                            last_wave: last_wave as u32,
+                        },
+                        S::Unsigned => PresignedExitStatus::Unsigned,
+                    },
+                    unsigned: exit.unsigned.iter().map(Into::into).collect(),
+                })
+                .collect(),
+            waves: p
+                .waves
+                .iter()
+                .map(|wave| PresignedWave {
+                    packages: wave
+                        .packages
+                        .iter()
+                        .map(|package| PresignedExitPackage {
+                            vtxo_id: package.vtxo_id.to_string(),
+                            exit: (&package.exit).into(),
+                            child: PresignedExitChild {
+                                txid: package.child.txid.to_string(),
+                                tx_hex: bitcoin::consensus::encode::serialize_hex(
+                                    &package.child.tx,
+                                ),
+                                total_fee_sats: package.child.fee_info.total_fee.to_sat(),
+                                fee_rate_sat_per_vb: package
+                                    .child
+                                    .fee_info
+                                    .fee_rate
+                                    .to_sat_per_vb_ceil(),
+                            },
+                        })
+                        .collect(),
+                    in_mempool: wave.in_mempool.iter().map(Into::into).collect(),
+                })
+                .collect(),
+        }
     }
 }

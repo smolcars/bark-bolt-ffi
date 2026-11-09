@@ -1,7 +1,7 @@
 # Installing and migrating
 
-This SDK exposes Bark 0.8.0 (`lib-0.8.0`, commit
-`959a489ff4934b181783b41c7d3ee68d85b95cbf`, 2026-10-22) through BoltFFI 0.31.1. Swift and Kotlin are the
+This SDK exposes Bark 0.8.1 (`lib-0.8.1`, commit
+`303682063ed7559b06dcf37c5cb37bb7037b943f`, 2026-11-05) through BoltFFI 0.31.1. Swift and Kotlin are the
 supported consumer languages. The Rust core remains in this repository.
 
 ## Swift
@@ -31,7 +31,7 @@ BOLTFFI="$PWD/target/tools/boltffi" scripts/build-sdk.sh android --release
 ./gradlew :sdk:android:publishToMavenLocal :sdk:jvm:publishToMavenLocal
 ```
 
-Use `mavenLocal()` with `io.github.niteshbalusu11:bark-bolt-ffi-android:0.10.0`,
+Use `mavenLocal()` with `io.github.niteshbalusu11:bark-bolt-ffi-android:0.11.0`,
 or the host-specific `bark-bolt-ffi-jvm-darwin-arm64` / `bark-bolt-ffi-jvm-linux-x86_64`
 artifact. Import `io.github.niteshbalusu11.bark.*`. The Maven POM supplies the
 coroutines dependency. The Android AAR embeds all three JNI ABIs and consumer
@@ -42,7 +42,7 @@ The tag build attaches versioned AAR/JAR/POM files to each GitHub release, such 
 [v0.10.0](https://github.com/smolcars/bark-bolt-ffi/releases/tag/v0.10.0);
 verify them against its SHA256SUMS. Releases attach the Linux x86_64 JVM JAR;
 build the Darwin JVM JAR from source. Use matching v0.10.0 bindings/native binaries,
-including on Swift. 0.7.0 changed the ABI of `BarkError`, `ExitProgressStatus`, `EmergencyExitFeeEstimate` and `BroadcastOutcome`; 0.7.1, 0.7.2 and 0.7.3 do not change it further, 0.8.0 only adds two `Wallet` methods, 0.9.0 only adds `Wallet.nextUnusedAddress()` and `OnchainWallet.nextUnusedAddress()`, and 0.10.0 only adds `Wallet.trustAndAdoptServerVtxoStatus()` with its `ServerStatusAdoption` and `VtxoInFlightState` enums. GitHub Actions also uploads artifacts and
+including on Swift. 0.7.0 changed the ABI of `BarkError`, `ExitProgressStatus`, `EmergencyExitFeeEstimate` and `BroadcastOutcome`; 0.7.1, 0.7.2 and 0.7.3 do not change it further, 0.8.0 only adds two `Wallet` methods, 0.9.0 only adds `Wallet.nextUnusedAddress()` and `OnchainWallet.nextUnusedAddress()`, 0.10.0 only adds `Wallet.trustAndAdoptServerVtxoStatus()` with its `ServerStatusAdoption` and `VtxoInFlightState` enums, and 0.11.0 only adds `Wallet.presignEmergencyExit()`, `Wallet.remainingExitTransactions()` and `Wallet.bolt11InvoiceWith()` with their records and `PresignedExitStatus` enum. GitHub Actions also uploads artifacts and
 example APKs. To use a downloaded AAR or JVM JAR directly, include it as a local
 file dependency and declare `org.jetbrains.kotlinx:kotlinx-coroutines-core:1.10.2`
 explicitly; local file dependencies do not resolve the attached Maven POM.
@@ -433,9 +433,10 @@ New:
   `amountMismatch(expectedSats, gotSats)`, `invalidAmount`, `unsupported`)
   explain why it cannot be used; `requiresAmount` and `supportsComment` tell the
   UI what to ask for. `defaultOption` is Bark's pick: the first error-free Ark,
-  then Lightning, then onchain option. Input that is no payment request, has
-  no supported destination, or is a BOLT12 offer priced in a fiat currency
-  fails with `BarkErrorCode.invalidPaymentRequest`.
+  then Lightning, then onchain option. Input that is no payment request or has
+  no supported destination fails with `BarkErrorCode.invalidPaymentRequest`.
+  Since 0.11.0 a BOLT12 offer priced in a fiat currency parses with
+  `amountSats` nil (Swift) or null (Kotlin); earlier versions rejected it.
 - `sendPayment(method, amountSats, comment, options)` pays one option and
   returns `PaymentResult.onchain(txid, movementId)`, `.lightning(status)` or
   `.ark(movementId)`. Output scripts and custom methods are rejected, as in Bark.
@@ -497,6 +498,33 @@ New and changed behaviour:
 - Confirmed-only board and send preparations re-check that their parents are
   still confirmed on first submit, and throw `preparedInputsUnavailable` after a
   reorg (or an error when the chain source is unreachable).
+
+## Presigned emergency exits and invoice expiry (v0.11.0)
+
+`presignEmergencyExit` signs the CPFP children of an emergency exit up front,
+so the exit can be broadcast later without this wallet, for example from cold
+storage or by someone else. Run the plan wave by wave and wait for each wave
+to confirm:
+
+```swift
+let plan = try await wallet.presignEmergencyExit(vtxoIds: ids, feeRateSatPerVb: nil)
+for wave in plan.waves {
+    // Submit each package as [exit.txHex, child.txHex] (bitcoind submitpackage),
+    // then wait until the wave and wave.inMempool confirm.
+}
+```
+
+```kotlin
+val plan = wallet.presignEmergencyExit(ids, null)
+for (wave in plan.waves) {
+    // Submit each package as [exit.txHex, child.txHex], then wait for confirmation.
+}
+```
+
+`remainingExitTransactions(vtxoIds)` lists the same transactions without
+signing anything. `bolt11InvoiceWith(amountSats, Bolt11InvoiceOptions(expirySecs: 600))`
+sets an invoice expiry up to the server's limit. See
+[CHANGELOG.md](../CHANGELOG.md#0110) for details.
 
 ## Checking VTXOs after a restore (v0.10.0)
 

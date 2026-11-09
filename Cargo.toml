@@ -1,6 +1,6 @@
 [package]
 name = "bark-bolt-ffi"
-version = "0.10.0"
+version = "0.11.0"
 edition = "2021"
 license = "MIT"
 authors = ["Team Second <hello@second.tech>"]
@@ -14,27 +14,27 @@ crate-type = ["lib", "staticlib", "cdylib"]
 [dependencies.ark]
 package = "ark-lib"
 git = "https://gitlab.com/ark-bitcoin/bark"
-rev = "959a489ff4934b181783b41c7d3ee68d85b95cbf"
+rev = "303682063ed7559b06dcf37c5cb37bb7037b943f"
 default-features = false
 
 [dependencies.bark]
 package = "bark-wallet"
 features = ["sqlite-bundled", "tls-webpki-roots", "native", "onchain-bdk", "bitcoind-rpc"]
 git = "https://gitlab.com/ark-bitcoin/bark"
-rev = "959a489ff4934b181783b41c7d3ee68d85b95cbf"
+rev = "303682063ed7559b06dcf37c5cb37bb7037b943f"
 default-features = false
 
 # Bark's own; names the in-flight states of `bark::vtxo::ServerStatusAdoption`.
 [dependencies.server-rpc]
 package = "bark-server-rpc"
 git = "https://gitlab.com/ark-bitcoin/bark"
-rev = "959a489ff4934b181783b41c7d3ee68d85b95cbf"
+rev = "303682063ed7559b06dcf37c5cb37bb7037b943f"
 default-features = false
 
 [dependencies.bark-bitcoin-ext]
 package = "bark-bitcoin-ext"
 git = "https://gitlab.com/ark-bitcoin/bark"
-rev = "959a489ff4934b181783b41c7d3ee68d85b95cbf"
+rev = "303682063ed7559b06dcf37c5cb37bb7037b943f"
 default-features = false
 
 [dependencies]

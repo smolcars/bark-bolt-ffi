@@ -6,6 +6,64 @@ Names use the Rust spelling: Swift lowercases the first letter
 SCREAMING_SNAKE enum constants (`BarkErrorCode.EXIT_NON_STANDARD_VTXO`) and
 class names for variants (`BroadcastOutcome.Uncertain`).
 
+## 0.11.0
+
+Bark moves to lib-0.8.1 (`30368206`). Adds three `Wallet` methods, ten
+records and one enum. The ABI of existing types is unchanged; fiat-priced
+BOLT12 offers now parse instead of failing (below). Databases stay
+compatible: Bark 0.8.1 has no wallet migration. RegTest now runs the 0.8.1
+server, which needs CLN v26.06 or later.
+
+### Presigned emergency exits
+
+- `Wallet::presign_emergency_exit(vtxo_ids, fee_rate_sat_per_vb?) -> PresignedExits`
+  signs a CPFP child for every exit transaction that still needs broadcasting,
+  for as long as confirmed onchain funds last. It broadcasts nothing and
+  reserves nothing. `PresignedExits.waves` is the broadcast plan: broadcast
+  all of a wave's `(exit, child)` packages together, then wait until they and
+  the wave's `in_mempool` transactions confirm before the next wave.
+  `PresignedExits.exits` has one entry per VTXO, with
+  `PresignedExitStatus::FullySigned { exited_in_wave, total_fee_sats, fee_rate_sat_per_vb }`,
+  `PartiallySigned { last_wave }` or `Unsigned`, and the unfunded tail in
+  `unsigned`. A package shared by several VTXOs appears once, under the first.
+  Omit the fee rate for Bark's default exit fee rate.
+- The onchain wallet reveals the change addresses the children pay to, so one
+  sync finds the whole chain once it is broadcast. A later spend from the
+  onchain wallet can invalidate the remaining children.
+- `Wallet::remaining_exit_transactions(vtxo_ids) -> RemainingExitTransactions`
+  lists the exit transactions not yet confirmed: per VTXO (`RemainingExit`,
+  in request order) the txids in broadcast order, and each transaction once in
+  `transactions`, parents before children. It signs nothing and doesn't touch
+  the onchain wallet. Statuses are from the last exit sync; call `sync_exits`
+  first for current ones.
+- Both error with `ExitUnknownVtxo`, `ExitVtxoAlreadyExited` or
+  `ExitVtxoAlreadySpent`. Presigning needs the built-in onchain wallet: a
+  wallet without one, or with a callback onchain wallet, gets an error.
+
+### Lightning invoice expiry
+
+- `Wallet::bolt11_invoice_with(amount_sats, Bolt11InvoiceOptions)` takes
+  `description`, `expiry_secs`, `token` and `claim_destination`, through Bark's
+  `Bolt11InvoiceBuilder`. The expiry defaults to, and cannot exceed, the
+  server's invoice expiry; a server that ignores it makes the call fail.
+  `bolt11_invoice` and `bolt11_invoice_for_address` are unchanged.
+
+### Fixes from Bark 0.8.1
+
+- Lightning sends that stayed pending after being paid now finish from the
+  stored preimage.
+- `parse_payment_request` now accepts a BOLT12 offer priced in a fiat
+  currency, with `amount_sats` unset. It used to fail with
+  `InvalidPaymentRequest`.
+- The client no longer advertises zstd compression to the server.
+
+### bdk_wallet 3.2
+
+Bark pins bdk_wallet 3.2.0, whose reopened wallet holds no private keys.
+Prepared sends and prepared boards signed with it, so on a reopened wallet
+they would have failed with "not fully signed". They now sign through Bark's
+own signers. Fee, inputs and outputs are unchanged.
+
 ## 0.10.0
 
 Bark stays at lib-0.8.0 (`959a489f`). Adds one `Wallet` method and two enums;
