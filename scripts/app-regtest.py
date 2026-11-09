@@ -117,6 +117,10 @@ def smoke(apps):
             state[receiver.platform] = received
         state[sender.platform] = sent
     for app in apps:
+        app.command('sync')
+        plan = app.command('presignExit')
+        assert plan['fullySigned'] and plan['packages'] == plan['remaining'] > 0, plan
+    for app in apps:
         again = app.command('open')
         assert again['fingerprint'] == state[app.platform]['fingerprint']
         assert again['spendable'] == state[app.platform]['spendable']

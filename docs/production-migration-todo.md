@@ -117,6 +117,7 @@ revision, since captaind 0.8.1 refuses older CLN. New API, so a minor release.
 - [x] Review: GPT-6.1 Sol (high), one round, approved `2c8d632` with no findings.
 - [x] [PR #13](https://github.com/smolcars/bark-bolt-ffi/pull/13) CI and main CI full matrix ([run 42629153673](https://github.com/smolcars/bark-bolt-ffi/actions/runs/42629153673)): `rust`, `apple` and `android` passed at merge commit `344a9cb`.
 - [x] Stage CI artifacts and move install docs to 0.11.0.
+- [x] Example apps: presign button and one-hour invoices; extended app RegTest passed on iOS and Android, and the app smoke now presigns.
 - [x] Publish [v0.11.0](https://github.com/smolcars/bark-bolt-ffi/releases/tag/v0.11.0) (tag `877cbcf`); all nine assets match `SHA256SUMS`, a clean SwiftPM consumer of the tag resolved the released XCFramework and passed the 17 live contracts, and Gradle resolved `bark-bolt-ffi-android:0.11.0@aar` from the release with Noah's repository setup.
 
 [Execution evidence](validation/bark-081-2026-11-09.md).

@@ -70,9 +70,7 @@ struct WalletView: View {
                         Button("Send payment") { model.perform { try await model.send(destination: destination, amount: amount) } }.accessibilityIdentifier("send-payment")
                     }
                     Section("Lightning receive") {
-                        Button("Create invoice for \(amount) sats") {
-                            model.perform { model.invoice = try await model.wallet!.bolt11Invoice(amountSats: model.amount(amount), description: "Bark example", token: nil).invoice }
-                        }
+                        Button("Create 1-hour invoice for \(amount) sats") { model.perform { try await model.createInvoice(amount: amount) } }
                         if !model.invoice.isEmpty { address("Invoice", model.invoice) }
                         Button("Claim received payments") { model.perform { _ = try await model.wallet!.tryClaimAllLightningReceives(wait: true) } }
                     }
@@ -90,6 +88,8 @@ struct WalletView: View {
                         Button("Board to Ark") { model.perform { _ = try await model.wallet!.boardAmount(amountSats: model.amount(boardAmount)); model.status = "Board submitted. Mine a block, then sync." } }.accessibilityIdentifier("board-wallet")
                         Button("Refresh VTXOs") { model.perform { let ids = try await model.wallet!.spendableVtxos().map(\.id); _ = try await model.wallet!.refreshVtxos(vtxoIds: ids) } }
                         Button("Offboard all to onchain address") { model.perform { _ = try await model.wallet!.offboardAll(bitcoinAddress: model.onchainAddress) } }
+                        Button("Presign emergency exit") { model.perform { try await model.presignExit() } }.accessibilityIdentifier("presign-exit")
+                        if !model.presignedExit.isEmpty { address("Presigned exit plan", model.presignedExit) }
                         Button("Start unilateral exit", role: .destructive) { confirmExit = true }
                         Button("Progress exits") { model.perform { _ = try await model.wallet!.progressExits(feeRateSatPerVb: nil) } }
                         Button("Claim matured exits") {

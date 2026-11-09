@@ -11,6 +11,7 @@ final class WalletModel: ObservableObject {
     @Published var arkAddress = ""
     @Published var onchainAddress = ""
     @Published var invoice = ""
+    @Published var presignedExit = ""
     @Published var activity: [Movement] = []
     @Published var opened = false
     @Published var notificationsReceived = 0
@@ -115,6 +116,31 @@ final class WalletModel: ObservableObject {
         status = "Payment sent"
     }
 
+    func createInvoice(amount: String) async throws {
+        guard let wallet else { throw AppError.message("Open a wallet first.") }
+        invoice = try await wallet.bolt11InvoiceWith(amountSats: self.amount(amount),
+            options: Bolt11InvoiceOptions(description: "Bark example", expirySecs: 3600)).invoice
+    }
+
+    /// Signs every spendable VTXO's exit children now, so the exit can be broadcast later without this wallet.
+    @discardableResult
+    func presignExit() async throws -> (plan: PresignedExits, remaining: RemainingExitTransactions) {
+        guard let wallet, let onchain else { throw AppError.message("Open a wallet first.") }
+        // Children only spend coins the onchain wallet already sees as confirmed.
+        _ = try await onchain.sync()
+        let ids = try await wallet.spendableVtxos().map(\.id)
+        guard !ids.isEmpty else { throw AppError.message("No spendable VTXOs to exit.") }
+        let remaining = try await wallet.remainingExitTransactions(vtxoIds: ids)
+        let plan = try await wallet.presignEmergencyExit(vtxoIds: ids, feeRateSatPerVb: nil)
+        presignedExit = plan.waves.enumerated().map { index, wave in
+            (["Wave \(index + 1): broadcast each exit with its child, then wait for confirmation"]
+                + wave.packages.map { "\($0.exit.txHex)\n\($0.child.txHex)" }).joined(separator: "\n")
+        }.joined(separator: "\n\n")
+        let packages = plan.waves.reduce(0) { $0 + $1.packages.count }
+        status = "Presigned \(packages) of \(remaining.transactions.count) exit transactions in \(plan.waves.count) wave\(plan.waves.count == 1 ? "" : "s")"
+        return (plan, remaining)
+    }
+
     #if DEBUG
     // Test orchestration uses the same SDK handles as the visible wallet.
     func automate(_ request: [String: Any]) async -> [String: Any] {
@@ -133,7 +159,7 @@ final class WalletModel: ObservableObject {
             case "board": extra["txid"] = try await wallet.boardAmount(amountSats: sats).txid
             case "send": try await send(destination: destination, amount: String(sats))
             case "invoice":
-                let result = try await wallet.bolt11Invoice(amountSats: sats, description: "SDK RegTest", token: nil)
+                let result = try await wallet.bolt11InvoiceWith(amountSats: sats, options: Bolt11InvoiceOptions(description: "SDK RegTest", expirySecs: 3600))
                 extra["invoice"] = result.invoice; extra["paymentHash"] = result.paymentHash
             case "claim": _ = try await wallet.tryClaimAllLightningReceives(wait: true)
             case "refresh": extra["txid"] = try await wallet.refreshVtxos(vtxoIds: wallet.spendableVtxos().map(\.id)) ?? ""
@@ -143,6 +169,12 @@ final class WalletModel: ObservableObject {
                 extra["totalFee"] = estimate.totalFeeSats
                 extra["broadcastFee"] = estimate.exitBroadcastFeeSats
                 extra["claimFee"] = estimate.claimFeeSats
+            case "presignExit":
+                let (plan, remaining) = try await presignExit()
+                extra["packages"] = plan.waves.reduce(0) { $0 + $1.packages.count }
+                extra["waves"] = plan.waves.count
+                extra["remaining"] = remaining.transactions.count
+                extra["fullySigned"] = plan.exits.allSatisfy { if case .fullySigned = $0.status { true } else { false } }
             case "startExit": try await wallet.startExitForVtxos(vtxoIds: wallet.spendableVtxos().prefix(1).map(\.id))
             case "progressExit":
                 _ = try await wallet.progressExits(feeRateSatPerVb: 1)

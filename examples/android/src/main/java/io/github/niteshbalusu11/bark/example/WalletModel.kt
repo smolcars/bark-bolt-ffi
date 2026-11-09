@@ -21,6 +21,7 @@ class WalletModel(application: Application) : AndroidViewModel(application) {
     var arkAddress by mutableStateOf(""); private set
     var onchainAddress by mutableStateOf(""); private set
     var invoice by mutableStateOf(""); private set
+    var presignedExit by mutableStateOf(""); private set
     var activity by mutableStateOf<List<Movement>>(emptyList()); private set
     var endpoint by mutableStateOf("http://127.0.0.1:3635")
     var bitcoinEndpoint by mutableStateOf("http://127.0.0.1:19443")
@@ -84,7 +85,25 @@ class WalletModel(application: Application) : AndroidViewModel(application) {
         status = "Payment sent"
     }
     suspend fun board(text: String) { checkNotNull(wallet).boardAmount(amount(text)); status = "Board submitted. Mine a block, then sync." }
-    suspend fun createInvoice(text: String) { invoice = checkNotNull(wallet).bolt11Invoice(amount(text), "Bark example").invoice }
+    suspend fun createInvoice(text: String) {
+        invoice = checkNotNull(wallet).bolt11InvoiceWith(amount(text), Bolt11InvoiceOptions(description = "Bark example", expirySecs = 3600u)).invoice
+    }
+    /** Signs every spendable VTXO's exit children now, so the exit can be broadcast later without this wallet. */
+    suspend fun presignExit(): Pair<PresignedExits, RemainingExitTransactions> {
+        val ark = checkNotNull(wallet)
+        // Children only spend coins the onchain wallet already sees as confirmed.
+        checkNotNull(onchain).sync()
+        val ids = ark.spendableVtxos().map { it.id }
+        require(ids.isNotEmpty()) { "No spendable VTXOs to exit." }
+        val remaining = ark.remainingExitTransactions(ids)
+        val plan = ark.presignEmergencyExit(ids, null)
+        presignedExit = plan.waves.mapIndexed { index, wave ->
+            (listOf("Wave ${index + 1}: broadcast each exit with its child, then wait for confirmation") +
+                wave.packages.map { "${it.exit.txHex}\n${it.child.txHex}" }).joinToString("\n")
+        }.joinToString("\n\n")
+        status = "Presigned ${plan.waves.sumOf { it.packages.size }} of ${remaining.transactions.size} exit transactions in ${plan.waves.size} wave${if (plan.waves.size == 1) "" else "s"}"
+        return plan to remaining
+    }
     suspend fun claim() { checkNotNull(wallet).tryClaimAllLightningReceives(true) }
     suspend fun refresh() { val ark = checkNotNull(wallet); ark.refreshVtxos(ark.spendableVtxos().map { it.id }) }
     suspend fun offboard() { checkNotNull(wallet).offboardAll(onchainAddress) }
@@ -112,13 +131,19 @@ class WalletModel(application: Application) : AndroidViewModel(application) {
                 "sync" -> sync()
                 "board" -> result.put("txid", ark.boardAmount(sats).txid)
                 "send" -> send(destination, sats.toString())
-                "invoice" -> { val invoice = ark.bolt11Invoice(sats, "SDK RegTest"); result.put("invoice", invoice.invoice).put("paymentHash", invoice.paymentHash) }
+                "invoice" -> { val invoice = ark.bolt11InvoiceWith(sats, Bolt11InvoiceOptions(description = "SDK RegTest", expirySecs = 3600u)); result.put("invoice", invoice.invoice).put("paymentHash", invoice.paymentHash) }
                 "claim" -> claim()
                 "refresh" -> result.put("txid", ark.refreshVtxos(ark.spendableVtxos().map { it.id }) ?: "")
                 "offboard" -> result.put("txid", ark.offboardVtxos(ark.spendableVtxos().take(1).map { it.id }, destination).txid)
                 "estimate" -> {
                     val estimate = ark.estimateEmergencyExitFee(emptyList(), 1u, onchainAddress)
                     result.put("totalFee", estimate.totalFeeSats.toLong()).put("broadcastFee", estimate.exitBroadcastFeeSats.toLong()).put("claimFee", estimate.claimFeeSats.toLong())
+                }
+                "presignExit" -> {
+                    val (plan, remaining) = presignExit()
+                    result.put("packages", plan.waves.sumOf { it.packages.size }).put("waves", plan.waves.size)
+                        .put("remaining", remaining.transactions.size)
+                        .put("fullySigned", plan.exits.all { it.status is PresignedExitStatus.FullySigned })
                 }
                 "startExit" -> ark.startExitForVtxos(ark.spendableVtxos().take(1).map { it.id })
                 "progressExit" -> { ark.progressExits(1u); result.put("claimable", ark.listClaimableExits().size).put("claimHeight", ark.allExitsClaimableAtHeight()?.toLong() ?: -1) }

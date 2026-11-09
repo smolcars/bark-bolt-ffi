@@ -94,7 +94,7 @@ fun WalletScreen(model: WalletModel) {
                 item { OutlinedTextField(amount, { amount = it }, label = { Text("Amount in sats") }, keyboardOptions = KeyboardOptions(keyboardType = KeyboardType.Number), modifier = Modifier.fillMaxWidth().testTag("send-amount"), enabled = !model.busy) }
                 item { Action("Send payment", model, "send-payment") { model.send(destination, amount) } }
                 item { Heading("Lightning receive") }
-                item { Action("Create invoice for $amount sats", model) { model.createInvoice(amount) } }
+                item { Action("Create 1-hour invoice for $amount sats", model) { model.createInvoice(amount) } }
                 if (model.invoice.isNotEmpty()) item { Address("Invoice", model.invoice) }
                 item { Action("Claim received payments", model) { model.claim() } }
                 item { Heading("Activity") }
@@ -110,6 +110,8 @@ fun WalletScreen(model: WalletModel) {
                 item { Action("Board to Ark", model, "board-wallet") { model.board(boardAmount) } }
                 item { Action("Refresh VTXOs", model) { model.refresh() } }
                 item { Action("Offboard all to onchain address", model) { model.offboard() } }
+                item { Action("Presign emergency exit", model, "presign-exit") { model.presignExit() } }
+                if (model.presignedExit.isNotEmpty()) item { Address("Presigned exit plan", model.presignedExit) }
                 item { OutlinedButton(onClick = { exitDialog = true }, enabled = !model.busy) { Text("Start unilateral exit", color = MaterialTheme.colorScheme.error) } }
                 item { Action("Progress exits", model) { model.progressExit() } }
                 item { Action("Claim matured exits", model) { model.drainExit() } }
