@@ -34,6 +34,11 @@ fn unavailable(message: &str) -> BarkError {
     BarkError::typed(BarkErrorCode::PreparedInputsUnavailable, message)
 }
 
+/// Bark's minimum: `board_psbt` refuses a board with this many blocks or fewer left.
+fn min_board_lifetime(config: &bark::Config, info: &ark::ArkInfo) -> u32 {
+    u32::from(config.vtxo_exit_margin) + info.required_board_confirmations as u32
+}
+
 fn board_fee(info: &ark::ArkInfo, gross: Amount) -> Result<Amount, BarkError> {
     if gross < info.min_board_amount {
         return Err(BarkError::typed(
@@ -93,15 +98,26 @@ impl Wallet {
             board_fee(&info, Amount::from_sat(*amount_sats))?;
         }
         let (keypair, key_index) = self.inner.peek_next_keypair().await?;
+        // Bark's default board expiry: `board_lifetime` capped at the server's VTXO lifetime.
+        let lifetime = self.inner.config().board_lifetime.min(info.vtxo_lifetime);
+        let min_lifetime = min_board_lifetime(self.inner.config(), &info);
+        if u32::from(lifetime) <= min_lifetime {
+            return Err(format!(
+                "board lifetime of {} blocks must be more than {min_lifetime}",
+                u32::from(lifetime)
+            )
+            .into());
+        }
         let expiry = u32::from(self.inner.chain().tip().await?)
-            .checked_add(u32::from(info.vtxo_lifetime))
+            .checked_add(u32::from(lifetime))
             .context("board expiry overflow")?;
         let builder = ark::board::BoardBuilder::new(
             keypair.public_key(),
             expiry.into(),
             info.server_pubkey,
             info.vtxo_exit_delta,
-        );
+        )
+        .context("invalid board parameters")?;
         let funding_script = builder.funding_script_pubkey();
         let address = bitcoin::Address::from_script(&funding_script, properties.network)
             .context("invalid board funding script")?;
@@ -293,15 +309,21 @@ impl Wallet {
             ids
         } else {
             let info = self.inner.require_ark_info().await?;
+            // Invalid parameters can only mean the server's changed since preparation.
             let builder = ark::board::BoardBuilder::new(
                 board.keypair.public_key(),
                 board.expiry_height.into(),
                 info.server_pubkey,
                 info.vtxo_exit_delta,
-            );
+            )
+            .ok();
             if board_fee(&info, board.gross)? != board.ark_fee
-                || builder.funding_script_pubkey() != board.funding_script
-                || u32::from(self.inner.chain().tip().await?) >= board.expiry_height
+                || builder.map(|b| b.funding_script_pubkey()).as_ref()
+                    != Some(&board.funding_script)
+                || board
+                    .expiry_height
+                    .saturating_sub(self.inner.chain().tip().await?.into())
+                    <= min_board_lifetime(self.inner.config(), &info)
             {
                 return Err(BarkError::typed(
                     BarkErrorCode::PreparedBoardChanged,
@@ -318,13 +340,20 @@ impl Wallet {
                     ));
                 }
             }
+            // Bark checks the key is stored and the script matches, so this follows the key check.
+            let funding = bark::BoardFundingAddress::try_from(&types::BoardFundingAddress {
+                address: bitcoin::Address::from_script(
+                    &board.funding_script,
+                    self.inner.network().await?,
+                )
+                .context("invalid board funding script")?
+                .to_string(),
+                user_pubkey: board.keypair.public_key().to_string(),
+                expiry_height: board.expiry_height,
+            })?;
             // Keep transient locks while Bark cosigns and checkpoints. Its best-effort
             // BDK register may refuse these locks; commit the same tx before releasing them.
-            let pending = match self
-                .inner
-                .board_psbt(psbt, board.keypair, board.expiry_height.into())
-                .await
-            {
+            let pending = match self.inner.board_psbt(psbt, &funding).await {
                 Ok(pending) => pending,
                 Err(error) => {
                     let reason = format!("{error:#}");

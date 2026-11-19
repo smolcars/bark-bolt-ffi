@@ -334,24 +334,29 @@ impl OnchainWalletTrait for CallbackWalletAdapter {
         // Convert to FFI-friendly CPFP params
         let tx_hex = hex::encode(bitcoin::consensus::serialize(tx));
 
-        let (fees_type, effective_rate, current_fee) = match fees {
-            MakeCpfpFees::Effective(fr) => ("Effective".to_string(), fr.to_sat_per_vb_ceil(), None),
-            MakeCpfpFees::Rbf {
-                min_effective_fee_rate,
-                current_package_fee,
-            } => (
-                "Rbf".to_string(),
-                min_effective_fee_rate.to_sat_per_vb_ceil(),
-                Some(current_package_fee.to_sat()),
-            ),
-        };
-
-        let params = CpfpParams {
+        let mut params = CpfpParams {
             tx_hex,
-            fees_type,
-            effective_fee_rate_sat_per_vb: effective_rate,
-            current_package_fee_sats: current_fee,
+            fees_type: "Effective".to_string(),
+            effective_fee_rate_sat_per_kwu: fees.effective().to_sat_per_kwu(),
+            replaced_fee_sats: None,
+            replaced_fee_rate_sat_per_kwu: None,
+            incremental_relay_fee_sat_per_kwu: None,
+            parent_in_mempool: None,
         };
+        if let MakeCpfpFees::Rbf {
+            replaced_fee,
+            replaced_fee_rate,
+            incremental_relay_fee,
+            parent_in_mempool,
+            ..
+        } = fees
+        {
+            params.fees_type = "Rbf".to_string();
+            params.replaced_fee_sats = Some(replaced_fee.to_sat());
+            params.replaced_fee_rate_sat_per_kwu = Some(replaced_fee_rate.to_sat_per_kwu());
+            params.incremental_relay_fee_sat_per_kwu = Some(incremental_relay_fee.to_sat_per_kwu());
+            params.parent_in_mempool = Some(parent_in_mempool);
+        }
 
         // Call callback
         let cpfp_tx_hex = self

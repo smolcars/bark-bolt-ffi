@@ -814,11 +814,14 @@ impl Wallet {
 
     /// Outcome of the seed-recovery scan that ran during `Wallet::open`.
     ///
-    /// Recovery only runs on the open that creates the wallet locally, and not
-    /// at all when `WalletOpenArgs.skip_recovery` is set, so this is `NotRun`
-    /// on every subsequent open. `Failed` means the scan errored before
+    /// Recovery starts on the open that creates the wallet locally, unless
+    /// `WalletOpenArgs.skip_recovery` is set. A later open is `NotRun`, or
+    /// `InProgress` while a started recovery isn't done, or `Failed` if its
+    /// stored state can't be read (even with
+    /// `skip_recovery`). `Failed` means the scan errored before
     /// producing a report — bark logs that and lets open succeed — so funds
-    /// may be missing until a retry; `Completed` carries the report, and
+    /// may be missing until a retry; `InProgress` means VTXOs are still
+    /// undecided and every sync resumes the recovery; `Completed` carries the report, and
     /// `isComplete == false` there means funds may still be missing. Retry the
     /// report's `failed` ids with `recoverVtxos`.
     pub fn recovery_status(&self) -> types::RecoveryStatus {
@@ -826,10 +829,18 @@ impl Wallet {
     }
 
     /// The report of the seed-recovery scan that ran during `Wallet::open`, or
-    /// none if the scan did not complete. Use `recovery_status` to tell a scan
-    /// that failed apart from one that never ran.
+    /// none if it did not run to the end. Use `recovery_status` to tell a scan
+    /// that failed or is in progress apart from one that never ran.
     pub fn recovery_report(&self) -> Option<types::RecoveryReport> {
         self.core.recovery_report()
+    }
+
+    /// The report of the seed recovery still in progress, or none once it is
+    /// done. Every sync resumes it; its `failed` VTXOs stay locked until the
+    /// server gives their status.
+    pub async fn pending_recovery(&self) -> Result<Option<types::RecoveryReport>, BarkError> {
+        self.run(|core| async move { core.pending_recovery().await })
+            .await
     }
 
     // ------------------------------------------------------------------------
@@ -936,7 +947,9 @@ impl Wallet {
         self.run(|core| async move { core.board_all().await }).await
     }
 
-    pub async fn board_funding_address(&self) -> Result<types::BoardFundingInfo, BarkError> {
+    /// A fresh address to fund a board from elsewhere. Persist the result,
+    /// fund it immediately and pass it unchanged to `board_psbt`.
+    pub async fn board_funding_address(&self) -> Result<types::BoardFundingAddress, BarkError> {
         self.run(|core| async move { core.board_funding_address().await })
             .await
     }
@@ -944,14 +957,10 @@ impl Wallet {
     pub async fn board_psbt(
         &self,
         psbt_base64: String,
-        keypair_index: u32,
-        expiry_height: u32,
+        funding: types::BoardFundingAddress,
     ) -> Result<types::PendingBoard, BarkError> {
-        self.run(|core| async move {
-            core.board_psbt(psbt_base64, keypair_index, expiry_height)
-                .await
-        })
-        .await
+        self.run(|core| async move { core.board_psbt(psbt_base64, funding).await })
+            .await
     }
 
     pub async fn sync_pending_boards(&self) -> Result<(), BarkError> {

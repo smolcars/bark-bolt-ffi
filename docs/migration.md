@@ -1,7 +1,7 @@
 # Installing and migrating
 
-This SDK exposes Bark 0.8.1 (`lib-0.8.1`, commit
-`303682063ed7559b06dcf37c5cb37bb7037b943f`, 2026-11-05) through BoltFFI 0.31.1. Swift and Kotlin are the
+This SDK exposes Bark 0.9.0 (`lib-0.9.0`, commit
+`bee6aeaeb303f6c3bc87f9ac1f005185238bbf11`, 2026-11-19) through BoltFFI 0.31.1. Swift and Kotlin are the
 supported consumer languages. The Rust core remains in this repository.
 
 ## Swift
@@ -42,7 +42,7 @@ The tag build attaches versioned AAR/JAR/POM files to each GitHub release, such 
 [v0.11.0](https://github.com/smolcars/bark-bolt-ffi/releases/tag/v0.11.0);
 verify them against its SHA256SUMS. Releases attach the Linux x86_64 JVM JAR;
 build the Darwin JVM JAR from source. Use matching v0.11.0 bindings/native binaries,
-including on Swift. 0.7.0 changed the ABI of `BarkError`, `ExitProgressStatus`, `EmergencyExitFeeEstimate` and `BroadcastOutcome`; 0.7.1, 0.7.2 and 0.7.3 do not change it further, 0.8.0 only adds two `Wallet` methods, 0.9.0 only adds `Wallet.nextUnusedAddress()` and `OnchainWallet.nextUnusedAddress()`, 0.10.0 only adds `Wallet.trustAndAdoptServerVtxoStatus()` with its `ServerStatusAdoption` and `VtxoInFlightState` enums, and 0.11.0 only adds `Wallet.presignEmergencyExit()`, `Wallet.remainingExitTransactions()` and `Wallet.bolt11InvoiceWith()` with their records and `PresignedExitStatus` enum. GitHub Actions also uploads artifacts and
+including on Swift. 0.7.0 changed the ABI of `BarkError`, `ExitProgressStatus`, `EmergencyExitFeeEstimate` and `BroadcastOutcome`; 0.7.1, 0.7.2 and 0.7.3 do not change it further, 0.8.0 only adds two `Wallet` methods, 0.9.0 only adds `Wallet.nextUnusedAddress()` and `OnchainWallet.nextUnusedAddress()`, 0.10.0 only adds `Wallet.trustAndAdoptServerVtxoStatus()` with its `ServerStatusAdoption` and `VtxoInFlightState` enums, and 0.11.0 only adds `Wallet.presignEmergencyExit()`, `Wallet.remainingExitTransactions()` and `Wallet.bolt11InvoiceWith()` with their records and `PresignedExitStatus` enum. 0.12.0 breaks the API for Bark 0.9.0: see [its section](#bark-090-v0120). GitHub Actions also uploads artifacts and
 example APKs. To use a downloaded AAR or JVM JAR directly, include it as a local
 file dependency and declare `org.jetbrains.kotlinx:kotlinx-coroutines-core:1.10.2`
 explicitly; local file dependencies do not resolve the attached Maven POM.
@@ -62,7 +62,7 @@ explicitly; local file dependencies do not resolve the attached Maven POM.
 | Swift resources | ARC releases native handles. The separate concurrency adapter marks synchronized native object wrappers Sendable for Swift 6 actor crossing. |
 | Callbacks | Implement all methods of `CustomOnchainWalletCallbacks` or `BarkLogger`. Native workers can call them off the UI thread; synchronize mutable state. Native ownership retains callbacks until their owner/logger registration is released. |
 | Notifications | One pending receive per holder. Explicit cancellation or host-task cancellation releases that wait; reuse is supported. Concurrent waits return an error. |
-| Recovery outcome | `open` mirrors upstream best-effort recovery. Inspect `recoveryStatus()` and the completed report's `isComplete` before declaring seed recovery successful. |
+| Recovery outcome | `open` mirrors upstream best-effort recovery. Inspect `recoveryStatus()` and the report's `isComplete` before declaring seed recovery successful. An `inProgress` recovery resumes on every sync; `pendingRecovery()` returns its report until it is done. |
 | Cancellation | Cancelling a foreign await does not roll back a submitted wallet operation. Tokio work already submitted may finish; sync/reconcile the wallet before retrying a payment. |
 | Daemon | Stop with `stopDaemonWait()` before replacing a wallet. Dropping the last native wallet also stops its daemon. |
 | Mailbox processor | Opt-in for `runDaemon: false` wallets. `stopMailboxProcessor()` waits until it has stopped; closing or dropping the wallet also stops it. It stays off while the daemon runs. |
@@ -498,6 +498,35 @@ New and changed behaviour:
 - Confirmed-only board and send preparations re-check that their parents are
   still confirmed on first submit, and throw `preparedInputsUnavailable` after a
   reorg (or an error when the chain source is unreachable).
+
+## Bark 0.9.0 (v0.12.0)
+
+Breaking. Externally funded boards keep Bark's `BoardFundingAddress` instead of
+a key index and expiry height:
+
+```swift
+let funding = try await wallet.boardFundingAddress()   // persist it, fund it now
+// ... another wallet builds `psbt` paying funding.address ...
+let board = try await wallet.boardPsbt(psbtBase64: psbt, funding: funding)
+```
+
+```kotlin
+val funding = wallet.boardFundingAddress()
+val board = wallet.boardPsbt(psbt, funding)
+```
+
+A funding address handed out by an older SDK can be rebuilt as
+`BoardFundingAddress(address, userPubkey: peekPublicKey(keypairIndex), expiryHeight)`.
+`boardPsbt` refuses one with `vtxoExitMargin` plus the server's required board
+confirmations or fewer blocks left, so board outstanding funding addresses
+near expiry before upgrading. Boards now default to `Config.boardLifetime` blocks
+(432 on mainnet). `ExitTxStatus.confirmed` only carries `block`.
+`RecoveryStatus` adds `inProgress(report)` and `RecoveryReport` adds
+`abandoned`. Callback onchain wallets read the exact `CpfpParams.effectiveFeeRateSatPerKwu`
+(was the rounded-up `effectiveFeeRateSatPerVb`), and `replacedFeeSats`,
+`replacedFeeRateSatPerKwu`, `incrementalRelayFeeSatPerKwu` and
+`parentInMempool` for `Rbf`. Update apps before servers move to 0.9.0. See
+[CHANGELOG.md](../CHANGELOG.md#0120).
 
 ## Presigned emergency exits and invoice expiry (v0.11.0)
 

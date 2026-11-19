@@ -285,7 +285,7 @@ fn live_exact_prepared_send_shared_handles_daemon_and_confirmed_drain() {
         };
         let psbt = bitcoin::Psbt::from_unsigned_tx(unsigned).unwrap();
         use base64::Engine;
-        assert_eq!(wallet.board_psbt(base64::engine::general_purpose::STANDARD.encode(psbt.serialize()), board_info.keypair_index, board_info.expiry_height).await.unwrap_err().code, BarkErrorCode::PreparedInputsUnavailable);
+        assert_eq!(wallet.board_psbt(base64::engine::general_purpose::STANDARD.encode(psbt.serialize()), board_info.clone()).await.unwrap_err().code, BarkErrorCode::PreparedInputsUnavailable);
         onchain.sync().await.unwrap();
         assert!(!onchain.transactions().await.unwrap().iter().any(|t| t.txid == prepared.txid));
 

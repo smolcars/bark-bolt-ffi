@@ -186,9 +186,15 @@ impl Wallet {
                         message
                     )
                 }
-                types::RecoveryStatus::Completed { report } => info!(
-                    "[OPEN] Seed recovery finished: {} recovered ({} sats), {} skipped, \
+                types::RecoveryStatus::InProgress { report }
+                | types::RecoveryStatus::Completed { report } => info!(
+                    "[OPEN] Seed recovery {}: {} recovered ({} sats), {} skipped, \
                      {} exited, {} foreign, {} failed, complete={}",
+                    if matches!(status, types::RecoveryStatus::InProgress { .. }) {
+                        "in progress"
+                    } else {
+                        "finished"
+                    },
                     report.recovered.vtxo_ids.len(),
                     report.recovered.total_sats,
                     report.skipped.vtxo_ids.len(),
@@ -230,11 +236,14 @@ impl Wallet {
     /// Outcome of the seed-recovery mailbox scan that ran during
     /// [`Self::open`].
     ///
-    /// Recovery only runs on the open that creates the wallet locally, and not
-    /// at all when `OpenArgs::skip_recovery` is set, so this is `NotRun` on
-    /// every subsequent open. `Failed` means the scan errored before producing
+    /// Recovery starts on the open that creates the wallet locally, unless
+    /// `OpenArgs::skip_recovery` is set. A later open is `NotRun`, or
+    /// `InProgress` while a started recovery isn't done, or `Failed` if its
+    /// stored state can't be read (even with
+    /// `skip_recovery`). `Failed` means the scan errored before producing
     /// a report — upstream logs that and lets open succeed — so funds may be
-    /// missing until a retry; `Completed` carries the report, and a report
+    /// missing until a retry; `InProgress` resumes on every sync;
+    /// `Completed` carries the report, and a report
     /// with `is_complete == false` means funds may still be missing. Retry
     /// `failed` ids with [`Self::recover_vtxos`].
     pub fn recovery_status(&self) -> types::RecoveryStatus {
@@ -242,10 +251,18 @@ impl Wallet {
     }
 
     /// The report of the seed-recovery scan that ran during [`Self::open`],
-    /// or `None` if the scan did not complete. Use [`Self::recovery_status`]
-    /// to tell a scan that failed apart from one that never ran.
+    /// or `None` if it did not run to the end. Use [`Self::recovery_status`]
+    /// to tell a scan that failed or is in progress apart from one that never ran.
     pub fn recovery_report(&self) -> Option<types::RecoveryReport> {
         self.recovery_status.report().cloned()
+    }
+
+    pub async fn pending_recovery(&self) -> Result<Option<types::RecoveryReport>, BarkError> {
+        Ok(self
+            .inner
+            .pending_recovery()
+            .await?
+            .map(|r| (&r.report).into()))
     }
 
     // ------------------------------------------------------------------------
@@ -1361,6 +1378,7 @@ impl Wallet {
             vtxo_refresh_expiry_threshold: Some(cfg.vtxo_refresh_expiry_threshold.into()),
             vtxo_exit_margin: Some(cfg.vtxo_exit_margin.into()),
             htlc_recv_claim_delta: Some(cfg.htlc_recv_claim_delta.into()),
+            board_lifetime: Some(cfg.board_lifetime.into()),
             fallback_fee_rate: cfg.fallback_fee_rate.map(|r| r.to_sat_per_kwu()),
             round_tx_required_confirmations: Some(cfg.round_tx_required_confirmations.into()),
             daemon_sync_interval_secs: Some(cfg.daemon_sync_interval_secs),
@@ -1430,45 +1448,37 @@ impl Wallet {
         Ok(pb.into())
     }
 
-    pub async fn board_funding_address(&self) -> Result<types::BoardFundingInfo, BarkError> {
-        let (keypair, keypair_index) = self
+    pub async fn board_funding_address(&self) -> Result<types::BoardFundingAddress, BarkError> {
+        let funding = self
             .inner
-            .derive_store_next_keypair()
-            .await
-            .context("Failed to derive board keypair")?;
-
-        let (address, expiry_height) = self
-            .inner
-            .board_funding_address(&keypair)
+            .board()
+            .funding_address()
             .await
             .context("Failed to get board funding address")?;
 
         info!(
-            "[BOARD] Board funding address: {} (keypair index: {}, expiry height: {})",
-            address, keypair_index, expiry_height
+            "[BOARD] Board funding address: {} (expiry height: {})",
+            funding.address(),
+            funding.expiry_height()
         );
 
-        Ok(types::BoardFundingInfo {
-            address: address.to_string(),
-            expiry_height: expiry_height.into(),
-            keypair_index,
-        })
+        Ok((&funding).into())
     }
 
     pub async fn board_psbt(
         &self,
         psbt_base64: String,
-        keypair_index: u32,
-        expiry_height: u32,
+        funding: types::BoardFundingAddress,
     ) -> Result<types::PendingBoard, BarkError> {
         let _operation = super::prepared_onchain::operation_guard(self.inner.onchain()).await;
         use bitcoin::base64::prelude::*;
         use bitcoin::psbt::Psbt;
 
         info!(
-            "[BOARD] Boarding from funding PSBT (keypair index: {}, expiry height: {})...",
-            keypair_index, expiry_height
+            "[BOARD] Boarding from funding PSBT (address: {}, expiry height: {})...",
+            funding.address, funding.expiry_height
         );
+        let funding = bark::BoardFundingAddress::try_from(&funding)?;
 
         let psbt_bytes = BASE64_STANDARD
             .decode(&psbt_base64)
@@ -1477,15 +1487,9 @@ impl Wallet {
         super::prepared_onchain::check_board_inputs(self.inner.onchain(), &psbt.unsigned_tx)
             .await?;
 
-        let keypair = self
-            .inner
-            .peek_keypair(keypair_index)
-            .await
-            .context("Unknown board keypair index")?;
-
         let pb = self
             .inner
-            .board_psbt(psbt, keypair, expiry_height.into())
+            .board_psbt(psbt, &funding)
             .await
             .context("Board psbt failed")?;
 
@@ -2400,6 +2404,7 @@ mod tests {
             vtxo_refresh_expiry_threshold: None,
             vtxo_exit_margin: None,
             htlc_recv_claim_delta: None,
+            board_lifetime: None,
             fallback_fee_rate: None,
             round_tx_required_confirmations: None,
             daemon_sync_interval_secs: None,

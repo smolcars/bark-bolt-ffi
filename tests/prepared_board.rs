@@ -773,3 +773,150 @@ fn live_board_failing_after_movement_write_is_uncertain_and_not_resubmitted() {
         wallet.discard_prepared_board(prepared.id).await.unwrap();
     });
 }
+
+#[test]
+fn live_external_board_funding_address_round_trip() {
+    if std::env::var("BARK_REGTEST").as_deref() != Ok("1") {
+        return;
+    }
+    tokio::runtime::Runtime::new().unwrap().block_on(async {
+        let directory = tempfile::tempdir().unwrap();
+        let mnemonic = generate_mnemonic().unwrap();
+        let wallet = Wallet::open(Network::Regtest, mnemonic, config(), args(directory.path()))
+            .await
+            .unwrap();
+        wallet.sync().await.unwrap();
+        let tip: u32 = regtest(&["bcli", "getblockcount"]).parse().unwrap();
+        let funding = wallet.board_funding_address().await.unwrap();
+        // RegTest's board_lifetime (4320) is capped at the server's 288-block VTXO lifetime.
+        assert_eq!(funding.expiry_height, tip + 288);
+
+        // Another wallet (bitcoind's) funds and finalises the board PSBT.
+        let outputs = format!(r#"[{{"{}":0.001}}]"#, funding.address);
+        let created: serde_json::Value = serde_json::from_str(&regtest(&[
+            "bcli",
+            "walletcreatefundedpsbt",
+            "[]",
+            &outputs,
+        ]))
+        .unwrap();
+        let signed: serde_json::Value = serde_json::from_str(&regtest(&[
+            "bcli",
+            "walletprocesspsbt",
+            created["psbt"].as_str().unwrap(),
+        ]))
+        .unwrap();
+        assert_eq!(signed["complete"], true);
+        let psbt = signed["psbt"].as_str().unwrap().to_owned();
+
+        // A record that doesn't match a wallet key is refused.
+        let mut foreign = funding.clone();
+        foreign.user_pubkey =
+            "0279be667ef9dcbbac55a06295ce870b07029bfcdb2dce28d959f2815b16f81798".into();
+        assert!(wallet.board_psbt(psbt.clone(), foreign).await.is_err());
+
+        let board = wallet.board_psbt(psbt, funding.clone()).await.unwrap();
+        assert_eq!(board.amount_sats, 100_000 - 330); // net of RegTest's minimum board fee
+        assert_eq!(board.vtxo_ids.len(), 1);
+        regtest(&["generate", "2"]);
+        wallet.sync().await.unwrap();
+        wallet.sync_pending_boards().await.unwrap();
+        let vtxo = wallet
+            .vtxos()
+            .await
+            .unwrap()
+            .into_iter()
+            .find(|v| v.id == board.vtxo_ids[0])
+            .unwrap();
+        assert_eq!(vtxo.expiry_height, funding.expiry_height);
+        assert!(wallet.pending_boards().await.unwrap().is_empty());
+    });
+}
+
+#[test]
+fn live_prepared_board_refuses_lifetime_bark_would_refuse() {
+    if std::env::var("BARK_REGTEST").as_deref() != Ok("1") {
+        return;
+    }
+    tokio::runtime::Runtime::new().unwrap().block_on(async {
+        let directory = tempfile::tempdir().unwrap();
+        let mnemonic = generate_mnemonic().unwrap();
+        // Bark needs more than vtxo_exit_margin (2) + required confirmations (1) blocks.
+        let mut short = config();
+        short.board_lifetime = Some(3);
+        let onchain = OnchainWallet::default(
+            Network::Regtest,
+            mnemonic.clone(),
+            short.clone(),
+            directory.path().to_str().unwrap().into(),
+        )
+        .await
+        .unwrap();
+        let wallet = Wallet::open_with_onchain(
+            Network::Regtest,
+            mnemonic.clone(),
+            short,
+            args(directory.path()),
+            &onchain,
+        )
+        .await
+        .unwrap();
+        let address = onchain.new_address().await.unwrap();
+        regtest(&["send-to", &address, "0.001"]);
+        regtest(&["generate", "1"]);
+        onchain.sync().await.unwrap();
+        wallet.sync().await.unwrap();
+        let before = files(directory.path());
+        let error = wallet
+            .prepare_board(OnchainSendAmount::DrainAll, 10, true, None)
+            .await
+            .unwrap_err();
+        assert!(
+            error.message().contains("must be more than 3"),
+            "{}",
+            error.message()
+        );
+        assert_eq!(files(directory.path()), before);
+        drop(wallet);
+        drop(onchain);
+
+        // Four blocks pass preparation; one mined block leaves three, which Bark refuses.
+        let mut config = config();
+        config.board_lifetime = Some(4);
+        let onchain = OnchainWallet::default(
+            Network::Regtest,
+            mnemonic.clone(),
+            config.clone(),
+            directory.path().to_str().unwrap().into(),
+        )
+        .await
+        .unwrap();
+        let wallet = Wallet::open_with_onchain(
+            Network::Regtest,
+            mnemonic,
+            config,
+            args(directory.path()),
+            &onchain,
+        )
+        .await
+        .unwrap();
+        onchain.sync().await.unwrap();
+        let prepared = wallet
+            .prepare_board(OnchainSendAmount::DrainAll, 10, true, None)
+            .await
+            .unwrap();
+        regtest(&["generate", "1"]);
+        // Bark caches the chain tip for a second.
+        tokio::time::sleep(std::time::Duration::from_millis(1100)).await;
+        assert_eq!(
+            wallet
+                .submit_prepared_board(prepared.id.clone())
+                .await
+                .unwrap_err()
+                .code,
+            BarkErrorCode::PreparedBoardChanged
+        );
+        assert!(wallet.pending_boards().await.unwrap().is_empty());
+        wallet.discard_prepared_board(prepared.id).await.unwrap();
+    });
+}

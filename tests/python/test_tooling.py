@@ -82,7 +82,9 @@ class ReleaseTests(unittest.TestCase):
         files = {
             'src/lib.rs': '// fixture\n',
             'Cargo.toml': '[package]\nname="fixture"\nversion="9.8.7"\nedition="2021"\n',
-            'Cargo.lock': 'version = 4\n[[package]]\nname="fixture"\nversion="9.8.7"\n',
+            'Cargo.lock': 'version = 4\n[[package]]\nname="fixture"\nversion="9.8.7"\n'
+                          '[[package]]\nname = "bark-wallet"\nversion = "1.2.3"\n'
+                          'source = "git+https://example.invalid/bark?rev=' + 'ab' * 20 + '#' + 'ab' * 20 + '"\n',
             'rust-toolchain.toml': '[toolchain]\nchannel="1.99.1"\n',
             'boltffi.toml': '', '.cargo/config.toml': '', 'sdk/swift-support/Concurrency.swift': '',
             'scripts/build-sdk.sh': '', 'sdk/swift/Sources/fixture.swift': '// SDK\n',
@@ -161,7 +163,9 @@ class ReleaseTests(unittest.TestCase):
             os.utime(binary, (1735689600, 1735689600))
             artifact.stage()
             self.assertEqual(first, hashlib.sha256(archive.read_bytes()).hexdigest())
-        self.assertEqual('9.8.7', json.loads((self.sdk / 'provenance.json').read_text())['version'])
+        provenance = json.loads((self.sdk / 'provenance.json').read_text())
+        self.assertEqual(('9.8.7', '1.2.3', 'ab' * 20),
+                         (provenance['version'], provenance['bark'], provenance['bark_revision']))
         self.assertIn('/v9.8.7/', (self.root / 'Package.swift').read_text())
 
 
