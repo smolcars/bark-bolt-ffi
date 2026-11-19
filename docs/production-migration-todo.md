@@ -104,7 +104,7 @@ CLN and its hold plugin are unchanged upstream.
 - [x] Review: GPT-6.2 Sol (high), three rounds; approved `227d00a` (S1–S8 resolved, S5 doc nit fixed after).
 - [x] [PR #14](https://github.com/smolcars/bark-bolt-ffi/pull/14) CI and main CI ([run 44455160090](https://github.com/smolcars/bark-bolt-ffi/actions/runs/44455160090), merge commit `c9c637e`) passed.
 - [x] Verify the Actions archive digests, stage `Package.swift`, `sdk/swift` and the install docs with the five-slice Apple build, and package the matching Android AAR, Linux JVM JAR and POMs with checksums and build provenance.
-- [ ] Tag and publish v0.12.0, verify public downloads, then run a clean SwiftPM consumer and resolve the Android and JVM assets through Gradle.
+- [x] Publish [v0.12.0](https://github.com/smolcars/bark-bolt-ffi/releases/tag/v0.12.0) (tag commit `5f97ff3`). Verified all public assets, passed 17 SwiftPM consumer contracts with live RegTest enabled, and resolved the Android AAR and Linux x86_64 JVM JAR through Gradle.
 
 [Execution evidence](validation/bark-090-2026-11-19.md).
 
