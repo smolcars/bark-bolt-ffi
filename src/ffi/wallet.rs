@@ -816,7 +816,8 @@ impl Wallet {
     ///
     /// Recovery starts on the open that creates the wallet locally, unless
     /// `WalletOpenArgs.skip_recovery` is set. A later open is `NotRun`, or
-    /// `InProgress` while a started recovery isn't done (even with
+    /// `InProgress` while a started recovery isn't done, or `Failed` if its
+    /// stored state can't be read (even with
     /// `skip_recovery`). `Failed` means the scan errored before
     /// producing a report — bark logs that and lets open succeed — so funds
     /// may be missing until a retry; `InProgress` means VTXOs are still

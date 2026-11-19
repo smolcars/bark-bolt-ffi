@@ -101,7 +101,8 @@ CLN and its hold plugin are unchanged upstream.
 - [x] Build and existing unit tests; config and `BoardFundingAddress` conversion unit tests.
 - [x] Live RegTest Rust suite, including a new externally funded board through `BoardFundingAddress` and its default expiry.
 - [x] Live Swift and Kotlin (JVM and packaged) contract tests against a fresh local SDK build.
-- [ ] Review, PR CI, main CI, staging and publication of v0.12.0.
+- [x] Review: GPT-6.2 Sol (high), three rounds; approved `227d00a` (S1–S8 resolved, S5 doc nit fixed after).
+- [ ] PR CI, main CI, staging and publication of v0.12.0.
 
 [Execution evidence](validation/bark-090-2026-11-19.md).
 
