@@ -7,10 +7,10 @@ supported consumer languages. The Rust core remains in this repository.
 ## Swift
 
 Add `https://github.com/smolcars/bark-bolt-ffi` in Xcode's package dependencies,
-select version 0.11.0, and link the `BarkBoltFFI` product. In a package manifest:
+select version 0.12.0, and link the `BarkBoltFFI` product. In a package manifest:
 
 ```swift
-.package(url: "https://github.com/smolcars/bark-bolt-ffi.git", exact: "0.11.0")
+.package(url: "https://github.com/smolcars/bark-bolt-ffi.git", exact: "0.12.0")
 // Target dependency:
 .product(name: "BarkBoltFFI", package: "bark-bolt-ffi")
 ```
@@ -31,17 +31,17 @@ BOLTFFI="$PWD/target/tools/boltffi" scripts/build-sdk.sh android --release
 ./gradlew :sdk:android:publishToMavenLocal :sdk:jvm:publishToMavenLocal
 ```
 
-Use `mavenLocal()` with `io.github.niteshbalusu11:bark-bolt-ffi-android:0.11.0`,
+Use `mavenLocal()` with `io.github.niteshbalusu11:bark-bolt-ffi-android:0.12.0`,
 or the host-specific `bark-bolt-ffi-jvm-darwin-arm64` / `bark-bolt-ffi-jvm-linux-x86_64`
 artifact. Import `io.github.niteshbalusu11.bark.*`. The Maven POM supplies the
 coroutines dependency. The Android AAR embeds all three JNI ABIs and consumer
 R8 rules. JVM JARs contain the native library for the build host; choose a JAR
 matching the deployment OS/architecture. Linux CI builds on Ubuntu24.04; rebuild
 locally when targeting an older libc. Maven Central publication is separate.
-The tag build attaches versioned AAR/JAR/POM files to each GitHub release, such as
-[v0.11.0](https://github.com/smolcars/bark-bolt-ffi/releases/tag/v0.11.0);
-verify them against its SHA256SUMS. Releases attach the Linux x86_64 JVM JAR;
-build the Darwin JVM JAR from source. Use matching v0.11.0 bindings/native binaries,
+GitHub releases attach versioned AAR/JAR/POM files. Verify the
+[v0.12.0 assets](https://github.com/smolcars/bark-bolt-ffi/releases/tag/v0.12.0)
+against the release SHA256SUMS. Releases attach the Linux x86_64 JVM JAR;
+build the Darwin JVM JAR from source. Use matching v0.12.0 bindings/native binaries,
 including on Swift. 0.7.0 changed the ABI of `BarkError`, `ExitProgressStatus`, `EmergencyExitFeeEstimate` and `BroadcastOutcome`; 0.7.1, 0.7.2 and 0.7.3 do not change it further, 0.8.0 only adds two `Wallet` methods, 0.9.0 only adds `Wallet.nextUnusedAddress()` and `OnchainWallet.nextUnusedAddress()`, 0.10.0 only adds `Wallet.trustAndAdoptServerVtxoStatus()` with its `ServerStatusAdoption` and `VtxoInFlightState` enums, and 0.11.0 only adds `Wallet.presignEmergencyExit()`, `Wallet.remainingExitTransactions()` and `Wallet.bolt11InvoiceWith()` with their records and `PresignedExitStatus` enum. 0.12.0 breaks the API for Bark 0.9.0: see [its section](#bark-090-v0120). GitHub Actions also uploads artifacts and
 example APKs. To use a downloaded AAR or JVM JAR directly, include it as a local
 file dependency and declare `org.jetbrains.kotlinx:kotlinx-coroutines-core:1.10.2`

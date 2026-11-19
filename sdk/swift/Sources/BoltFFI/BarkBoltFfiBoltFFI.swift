@@ -102,6 +102,9 @@ public struct Config: Hashable, Equatable, Sendable {
     public var vtxoRefreshExpiryThreshold: UInt16?
     public var vtxoExitMargin: UInt16?
     public var htlcRecvClaimDelta: UInt16?
+    /// Blocks from the tip until a new board's VTXO expires, capped at the
+    /// server's VTXO lifetime. Default: 432 (3 days) on mainnet, 4320 elsewhere.
+    public var boardLifetime: UInt16?
     public var fallbackFeeRate: UInt64?
     public var roundTxRequiredConfirmations: UInt32?
     public var daemonSyncIntervalSecs: UInt64?
@@ -134,6 +137,7 @@ public struct Config: Hashable, Equatable, Sendable {
         vtxoRefreshExpiryThreshold: UInt16? = nil,
         vtxoExitMargin: UInt16? = nil,
         htlcRecvClaimDelta: UInt16? = nil,
+        boardLifetime: UInt16? = nil,
         fallbackFeeRate: UInt64? = nil,
         roundTxRequiredConfirmations: UInt32? = nil,
         daemonSyncIntervalSecs: UInt64? = nil,
@@ -153,6 +157,7 @@ public struct Config: Hashable, Equatable, Sendable {
         self.vtxoRefreshExpiryThreshold = vtxoRefreshExpiryThreshold
         self.vtxoExitMargin = vtxoExitMargin
         self.htlcRecvClaimDelta = htlcRecvClaimDelta
+        self.boardLifetime = boardLifetime
         self.fallbackFeeRate = fallbackFeeRate
         self.roundTxRequiredConfirmations = roundTxRequiredConfirmations
         self.daemonSyncIntervalSecs = daemonSyncIntervalSecs
@@ -175,6 +180,7 @@ public struct Config: Hashable, Equatable, Sendable {
             vtxoRefreshExpiryThreshold: reader.readOptional { reader in reader.readU16() },
             vtxoExitMargin: reader.readOptional { reader in reader.readU16() },
             htlcRecvClaimDelta: reader.readOptional { reader in reader.readU16() },
+            boardLifetime: reader.readOptional { reader in reader.readU16() },
             fallbackFeeRate: reader.readOptional { reader in reader.readU64() },
             roundTxRequiredConfirmations: reader.readOptional { reader in reader.readU32() },
             daemonSyncIntervalSecs: reader.readOptional { reader in reader.readU64() },
@@ -197,6 +203,7 @@ public struct Config: Hashable, Equatable, Sendable {
         writer.writeOptional(self.vtxoRefreshExpiryThreshold) { writer, boltffiValue0 in writer.writeU16(boltffiValue0) }
         writer.writeOptional(self.vtxoExitMargin) { writer, boltffiValue0 in writer.writeU16(boltffiValue0) }
         writer.writeOptional(self.htlcRecvClaimDelta) { writer, boltffiValue0 in writer.writeU16(boltffiValue0) }
+        writer.writeOptional(self.boardLifetime) { writer, boltffiValue0 in writer.writeU16(boltffiValue0) }
         writer.writeOptional(self.fallbackFeeRate) { writer, boltffiValue0 in writer.writeU64(boltffiValue0) }
         writer.writeOptional(self.roundTxRequiredConfirmations) { writer, boltffiValue0 in writer.writeU32(boltffiValue0) }
         writer.writeOptional(self.daemonSyncIntervalSecs) { writer, boltffiValue0 in writer.writeU64(boltffiValue0) }
@@ -1117,31 +1124,33 @@ public struct PendingBoard: Hashable, Equatable, Sendable {
     }
 }
 
-/// Destination for an externally funded board (e.g. a payjoin receive).
+/// Destination for an externally funded board (e.g. a payjoin receive),
+/// Bark's `BoardFundingAddress`.
 ///
-/// The funding script commits to the derived keypair and expiry height, so
-/// `keypair_index` and `expiry_height` must be passed back unchanged to
-/// `board_psbt` once the funding PSBT is available — including on retries
-/// after the sender changes the transaction.
-public struct BoardFundingInfo: Hashable, Equatable, Sendable {
+/// Persist it and pass it back unchanged to `board_psbt` once the funding
+/// PSBT is available, including on retries after the sender changes the
+/// transaction. Fund it immediately: the VTXO's lifetime started when it was
+/// made, and once it expires the server can sweep the funding output.
+public struct BoardFundingAddress: Hashable, Equatable, Sendable {
     public var address: String
+    /// Hex public key of the wallet key the board commits to.
+    public var userPubkey: String
     public var expiryHeight: UInt32
-    public var keypairIndex: UInt32
 
-    public init(address: String, expiryHeight: UInt32, keypairIndex: UInt32) {
+    public init(address: String, userPubkey: String, expiryHeight: UInt32) {
         self.address = address
+        self.userPubkey = userPubkey
         self.expiryHeight = expiryHeight
-        self.keypairIndex = keypairIndex
     }
 
-    @inlinable static func decode(from reader: inout WireReader) -> BoardFundingInfo {
-        BoardFundingInfo(address: reader.readString(), expiryHeight: reader.readU32(), keypairIndex: reader.readU32())
+    @inlinable static func decode(from reader: inout WireReader) -> BoardFundingAddress {
+        BoardFundingAddress(address: reader.readString(), userPubkey: reader.readString(), expiryHeight: reader.readU32())
     }
 
     @inlinable func encode(to writer: inout WireWriter) {
         writer.writeString(self.address)
+        writer.writeString(self.userPubkey)
         writer.writeU32(self.expiryHeight)
-        writer.writeU32(self.keypairIndex)
     }
 }
 
@@ -1749,7 +1758,10 @@ public struct RecoveryReport: Hashable, Equatable, Sendable {
     public var failed: RecoveryBucket
     /// Already fully exited on-chain.
     public var exited: RecoveryBucket
-    /// Whether the scan accounted for every VTXO: no `failed`, no `foreign`.
+    /// Given up on after Bark's 40 undecided attempts. One whose body is
+    /// stored stays locked, and a later recovery tries it again.
+    public var abandoned: RecoveryBucket
+    /// Whether the scan accounted for every VTXO: no `failed`, `abandoned` or `foreign`.
     public var isComplete: Bool
 
     public init(
@@ -1758,6 +1770,7 @@ public struct RecoveryReport: Hashable, Equatable, Sendable {
         foreign: RecoveryBucket,
         failed: RecoveryBucket,
         exited: RecoveryBucket,
+        abandoned: RecoveryBucket,
         isComplete: Bool
     ) {
         self.recovered = recovered
@@ -1765,6 +1778,7 @@ public struct RecoveryReport: Hashable, Equatable, Sendable {
         self.foreign = foreign
         self.failed = failed
         self.exited = exited
+        self.abandoned = abandoned
         self.isComplete = isComplete
     }
 
@@ -1775,6 +1789,7 @@ public struct RecoveryReport: Hashable, Equatable, Sendable {
             foreign: RecoveryBucket.decode(from: &reader),
             failed: RecoveryBucket.decode(from: &reader),
             exited: RecoveryBucket.decode(from: &reader),
+            abandoned: RecoveryBucket.decode(from: &reader),
             isComplete: reader.readBool()
         )
     }
@@ -1785,6 +1800,7 @@ public struct RecoveryReport: Hashable, Equatable, Sendable {
         self.foreign.encode(to: &writer)
         self.failed.encode(to: &writer)
         self.exited.encode(to: &writer)
+        self.abandoned.encode(to: &writer)
         writer.writeBool(self.isComplete)
     }
 }
@@ -1997,35 +2013,56 @@ public struct BlockRef: Hashable, Equatable, Sendable {
 public struct CpfpParams: Hashable, Equatable, Sendable {
     public var txHex: String
     public var feesType: String
-    public var effectiveFeeRateSatPerVb: UInt64
-    public var currentPackageFeeSats: UInt64?
+    /// The package's target effective fee rate, exact, in sat/kwu (sat/vB × 250).
+    public var effectiveFeeRateSatPerKwu: UInt64
+    /// `Rbf` only, as in Bark's `MakeCpfpFees::Rbf`: the replacement pays at
+    /// least `replaced_fee_sats` plus the incremental relay fee over its own
+    /// weight, at a feerate above the replaced one by the incremental relay fee.
+    /// The replacement is the child, or the whole package if the parent isn't
+    /// in the mempool. Rates are exact, in sat/kwu (sat/vB × 250).
+    public var replacedFeeSats: UInt64?
+    public var replacedFeeRateSatPerKwu: UInt64?
+    public var incrementalRelayFeeSatPerKwu: UInt64?
+    public var parentInMempool: Bool?
 
     public init(
         txHex: String,
         feesType: String,
-        effectiveFeeRateSatPerVb: UInt64,
-        currentPackageFeeSats: UInt64?
+        effectiveFeeRateSatPerKwu: UInt64,
+        replacedFeeSats: UInt64?,
+        replacedFeeRateSatPerKwu: UInt64?,
+        incrementalRelayFeeSatPerKwu: UInt64?,
+        parentInMempool: Bool?
     ) {
         self.txHex = txHex
         self.feesType = feesType
-        self.effectiveFeeRateSatPerVb = effectiveFeeRateSatPerVb
-        self.currentPackageFeeSats = currentPackageFeeSats
+        self.effectiveFeeRateSatPerKwu = effectiveFeeRateSatPerKwu
+        self.replacedFeeSats = replacedFeeSats
+        self.replacedFeeRateSatPerKwu = replacedFeeRateSatPerKwu
+        self.incrementalRelayFeeSatPerKwu = incrementalRelayFeeSatPerKwu
+        self.parentInMempool = parentInMempool
     }
 
     @inlinable static func decode(from reader: inout WireReader) -> CpfpParams {
         CpfpParams(
             txHex: reader.readString(),
             feesType: reader.readString(),
-            effectiveFeeRateSatPerVb: reader.readU64(),
-            currentPackageFeeSats: reader.readOptional { reader in reader.readU64() }
+            effectiveFeeRateSatPerKwu: reader.readU64(),
+            replacedFeeSats: reader.readOptional { reader in reader.readU64() },
+            replacedFeeRateSatPerKwu: reader.readOptional { reader in reader.readU64() },
+            incrementalRelayFeeSatPerKwu: reader.readOptional { reader in reader.readU64() },
+            parentInMempool: reader.readOptional { reader in reader.readBool() }
         )
     }
 
     @inlinable func encode(to writer: inout WireWriter) {
         writer.writeString(self.txHex)
         writer.writeString(self.feesType)
-        writer.writeU64(self.effectiveFeeRateSatPerVb)
-        writer.writeOptional(self.currentPackageFeeSats) { writer, boltffiValue0 in writer.writeU64(boltffiValue0) }
+        writer.writeU64(self.effectiveFeeRateSatPerKwu)
+        writer.writeOptional(self.replacedFeeSats) { writer, boltffiValue0 in writer.writeU64(boltffiValue0) }
+        writer.writeOptional(self.replacedFeeRateSatPerKwu) { writer, boltffiValue0 in writer.writeU64(boltffiValue0) }
+        writer.writeOptional(self.incrementalRelayFeeSatPerKwu) { writer, boltffiValue0 in writer.writeU64(boltffiValue0) }
+        writer.writeOptional(self.parentInMempool) { writer, boltffiValue0 in writer.writeBool(boltffiValue0) }
     }
 }
 
@@ -3026,8 +3063,8 @@ public enum ExitTxStatus: Hashable, Equatable, Sendable {
     case awaitingCpfpBroadcast
     /// CPFP child broadcast; waiting for confirmation.
     case awaitingConfirmation(childTxid: String, origin: ExitTxOrigin)
-    /// Confirmed in a block.
-    case confirmed(childTxid: String, block: BlockRef, origin: ExitTxOrigin)
+    /// The exit transaction itself confirmed in `block`, with or without a CPFP child.
+    case confirmed(block: BlockRef)
 
     @inlinable static func decode(from reader: inout WireReader) -> ExitTxStatus {
         let tag = reader.readU32()
@@ -3041,7 +3078,7 @@ public enum ExitTxStatus: Hashable, Equatable, Sendable {
         case 3:
             return .awaitingConfirmation(childTxid: reader.readString(), origin: ExitTxOrigin.decode(from: &reader))
         case 4:
-            return .confirmed(childTxid: reader.readString(), block: BlockRef.decode(from: &reader), origin: ExitTxOrigin.decode(from: &reader))
+            return .confirmed(block: BlockRef.decode(from: &reader))
         default:
             fatalError("Invalid ExitTxStatus tag: \(tag)")
         }
@@ -3060,11 +3097,9 @@ public enum ExitTxStatus: Hashable, Equatable, Sendable {
             writer.writeU32(3)
             writer.writeString(childTxid)
             origin.encode(to: &writer)
-        case let .confirmed(childTxid, block, origin):
+        case let .confirmed(block):
             writer.writeU32(4)
-            writer.writeString(childTxid)
             block.encode(to: &writer)
-            origin.encode(to: &writer)
         }
     }
 }
@@ -3268,18 +3303,23 @@ public enum RoundFlowKind: Int32, Hashable, Sendable, CaseIterable {
 /// Outcome of the seed-recovery scan `Wallet::open` runs, mirroring
 /// `bark::RecoveryStatus`.
 ///
-/// The three variants are distinguishable on purpose: `NotRun` means nothing
-/// was attempted (wallet already existed locally, or `skip_recovery` was set),
-/// `Failed` means the scan errored before producing a report so funds may be
-/// missing until a retry succeeds, and `Completed` carries the report — whose
-/// `is_complete` can still be `false` for individual VTXOs.
+/// The variants are distinguishable on purpose: `NotRun` means nothing was
+/// attempted (no recovery in progress, and the wallet already existed locally
+/// or `skip_recovery` was set), `Failed` means the scan errored before
+/// producing a report so funds may be missing until a retry succeeds,
+/// `InProgress` means it stopped with VTXOs still undecided (they stay locked
+/// and every sync resumes the recovery), and `Completed` carries the report —
+/// whose `is_complete` can still be `false` for individual VTXOs.
 ///
-/// Serde tags: `"not-run"` | `"failed"` | `"completed"`.
+/// Serde tags: `"not-run"` | `"failed"` | `"in-progress"` | `"completed"`.
 public enum RecoveryStatus: Hashable, Equatable, Sendable {
     /// No scan was attempted.
     case notRun
     /// The scan errored before it could produce a report.
     case failed(message: String)
+    /// The scan stopped before it was done; every sync resumes it. The report
+    /// holds what it decided so far.
+    case inProgress(report: RecoveryReport)
     /// The scan ran to the end.
     case completed(report: RecoveryReport)
 
@@ -3291,6 +3331,8 @@ public enum RecoveryStatus: Hashable, Equatable, Sendable {
         case 1:
             return .failed(message: reader.readString())
         case 2:
+            return .inProgress(report: RecoveryReport.decode(from: &reader))
+        case 3:
             return .completed(report: RecoveryReport.decode(from: &reader))
         default:
             fatalError("Invalid RecoveryStatus tag: \(tag)")
@@ -3304,8 +3346,11 @@ public enum RecoveryStatus: Hashable, Equatable, Sendable {
         case let .failed(message):
             writer.writeU32(1)
             writer.writeString(message)
-        case let .completed(report):
+        case let .inProgress(report):
             writer.writeU32(2)
+            report.encode(to: &writer)
+        case let .completed(report):
+            writer.writeU32(3)
             report.encode(to: &writer)
         }
     }
@@ -6293,11 +6338,14 @@ public final class Wallet {
 
     /// Outcome of the seed-recovery scan that ran during `Wallet::open`.
     ///
-    /// Recovery only runs on the open that creates the wallet locally, and not
-    /// at all when `WalletOpenArgs.skip_recovery` is set, so this is `NotRun`
-    /// on every subsequent open. `Failed` means the scan errored before
+    /// Recovery starts on the open that creates the wallet locally, unless
+    /// `WalletOpenArgs.skip_recovery` is set. A later open is `NotRun`, or
+    /// `InProgress` while a started recovery isn't done, or `Failed` if its
+    /// stored state can't be read (even with
+    /// `skip_recovery`). `Failed` means the scan errored before
     /// producing a report — bark logs that and lets open succeed — so funds
-    /// may be missing until a retry; `Completed` carries the report, and
+    /// may be missing until a retry; `InProgress` means VTXOs are still
+    /// undecided and every sync resumes the recovery; `Completed` carries the report, and
     /// `isComplete == false` there means funds may still be missing. Retry the
     /// report's `failed` ids with `recoverVtxos`.
     public func recoveryStatus() -> RecoveryStatus {
@@ -6307,12 +6355,38 @@ public final class Wallet {
     }
 
     /// The report of the seed-recovery scan that ran during `Wallet::open`, or
-    /// none if the scan did not complete. Use `recovery_status` to tell a scan
-    /// that failed apart from one that never ran.
+    /// none if it did not run to the end. Use `recovery_status` to tell a scan
+    /// that failed or is in progress apart from one that never ran.
     public func recoveryReport() -> RecoveryReport? {
         let boltffiResult = boltffi_method_class_bark_bolt_ffi_ffi_wallet_wallet_recovery_report(self.handle)
         defer { boltffi_free_buf(boltffiResult) }
         return boltffiDecodeOwnedBuf(boltffiResult.ptr, Int(boltffiResult.len)) { boltffiReader in boltffiReader.readOptional { boltffiReader in RecoveryReport.decode(from: &boltffiReader) } }
+    }
+
+    /// The report of the seed recovery still in progress, or none once it is
+    /// done. Every sync resumes it; its `failed` VTXOs stay locked until the
+    /// server gives their status.
+    public func pendingRecovery() async throws -> RecoveryReport? {
+        let boltffiFuture = boltffi_method_class_bark_bolt_ffi_ffi_wallet_wallet_pending_recovery(self.handle)
+        return try await boltffiAsyncCall(
+            futureHandle: boltffiFuture,
+            poll: boltffi_async_method_class_bark_bolt_ffi_ffi_wallet_wallet_pending_recovery_poll,
+            cancel: boltffi_async_method_class_bark_bolt_ffi_ffi_wallet_wallet_pending_recovery_cancel,
+            free: boltffi_async_method_class_bark_bolt_ffi_ffi_wallet_wallet_pending_recovery_free
+        ) { boltffiFuture, boltffiStatus in
+            var boltffiResult: FfiBuf_u8 = FfiBuf_u8()
+            let boltffiError = boltffi_async_method_class_bark_bolt_ffi_ffi_wallet_wallet_pending_recovery_complete(boltffiFuture, boltffiStatus, &boltffiResult)
+            if boltffiError.ptr != nil || Int(boltffiError.len) != 0 {
+                defer { boltffi_free_buf(boltffiError) }
+                throw boltffiDecodeOwnedBuf(boltffiError.ptr, Int(boltffiError.len)) { boltffiErrorReader in BarkError.decode(from: &boltffiErrorReader) }
+            }
+            let boltffiStatusCode = boltffiStatus!.pointee.code
+            guard boltffiStatusCode == 0 else {
+                throw FfiError(message: "FFI failed in async completion with code \(boltffiStatusCode)")
+            }
+            defer { boltffi_free_buf(boltffiResult) }
+            return boltffiDecodeOwnedBuf(boltffiResult.ptr, Int(boltffiResult.len)) { boltffiReader in boltffiReader.readOptional { boltffiReader in RecoveryReport.decode(from: &boltffiReader) } }
+        }
     }
 
     public func properties() async throws -> WalletProperties {
@@ -6615,7 +6689,9 @@ public final class Wallet {
         }
     }
 
-    public func boardFundingAddress() async throws -> BoardFundingInfo {
+    /// A fresh address to fund a board from elsewhere. Persist the result,
+    /// fund it immediately and pass it unchanged to `board_psbt`.
+    public func boardFundingAddress() async throws -> BoardFundingAddress {
         let boltffiFuture = boltffi_method_class_bark_bolt_ffi_ffi_wallet_wallet_board_funding_address(self.handle)
         return try await boltffiAsyncCall(
             futureHandle: boltffiFuture,
@@ -6634,20 +6710,23 @@ public final class Wallet {
                 throw FfiError(message: "FFI failed in async completion with code \(boltffiStatusCode)")
             }
             defer { boltffi_free_buf(boltffiResult) }
-            return boltffiDecodeOwnedBuf(boltffiResult.ptr, Int(boltffiResult.len)) { boltffiReader in BoardFundingInfo.decode(from: &boltffiReader) }
+            return boltffiDecodeOwnedBuf(boltffiResult.ptr, Int(boltffiResult.len)) { boltffiReader in BoardFundingAddress.decode(from: &boltffiReader) }
         }
     }
 
-    public func boardPsbt(psbtBase64: String, keypairIndex: UInt32, expiryHeight: UInt32) async throws -> PendingBoard {
+    public func boardPsbt(psbtBase64: String, funding: BoardFundingAddress) async throws -> PendingBoard {
         let boltffiPsbtBase64Bytes = boltffiEncode { boltffiPsbtBase64Writer in boltffiPsbtBase64Writer.writeString(psbtBase64) }
         let boltffiFuture = boltffiPsbtBase64Bytes.withUnsafeBufferPointer { boltffiPsbtBase64Buffer in
-            return boltffi_method_class_bark_bolt_ffi_ffi_wallet_wallet_board_psbt(
-                self.handle,
-                boltffiPsbtBase64Buffer.baseAddress!,
-                UInt(boltffiPsbtBase64Buffer.count),
-                keypairIndex,
-                expiryHeight
-            )
+            let boltffiFundingBytes = boltffiEncode { boltffiFundingWriter in funding.encode(to: &boltffiFundingWriter) }
+            return boltffiFundingBytes.withUnsafeBufferPointer { boltffiFundingBuffer in
+                return boltffi_method_class_bark_bolt_ffi_ffi_wallet_wallet_board_psbt(
+                    self.handle,
+                    boltffiPsbtBase64Buffer.baseAddress!,
+                    UInt(boltffiPsbtBase64Buffer.count),
+                    boltffiFundingBuffer.baseAddress!,
+                    UInt(boltffiFundingBuffer.count)
+                )
+            }
         }
         return try await boltffiAsyncCall(
             futureHandle: boltffiFuture,

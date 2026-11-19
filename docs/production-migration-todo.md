@@ -102,7 +102,9 @@ CLN and its hold plugin are unchanged upstream.
 - [x] Live RegTest Rust suite, including a new externally funded board through `BoardFundingAddress` and its default expiry.
 - [x] Live Swift and Kotlin (JVM and packaged) contract tests against a fresh local SDK build.
 - [x] Review: GPT-6.2 Sol (high), three rounds; approved `227d00a` (S1–S8 resolved, S5 doc nit fixed after).
-- [ ] PR CI, main CI, staging and publication of v0.12.0.
+- [x] [PR #14](https://github.com/smolcars/bark-bolt-ffi/pull/14) CI and main CI ([run 44455160090](https://github.com/smolcars/bark-bolt-ffi/actions/runs/44455160090), merge commit `c9c637e`) passed.
+- [x] Verify the Actions archive digests, stage `Package.swift`, `sdk/swift` and the install docs with the five-slice Apple build, and package the matching Android AAR, Linux JVM JAR and POMs with checksums and build provenance.
+- [ ] Tag and publish v0.12.0, verify public downloads, then run a clean SwiftPM consumer and resolve the Android and JVM assets through Gradle.
 
 [Execution evidence](validation/bark-090-2026-11-19.md).
 
