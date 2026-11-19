@@ -10,8 +10,9 @@ class names for variants (`BroadcastOutcome.Uncertain`).
 
 Bark moves to lib-0.9.0 (`bee6aeae`). This release breaks the API: it follows
 Bark's new board funding model and drops removed fields, with no compatibility
-shims. Bark 0.9.0 adds wallet migration m0043 (an index), so a database opened
-by 0.12.0 can't go back to an older SDK. RegTest runs the 0.9.0 server.
+shims. Bark 0.9.0 adds wallet migration m0043 (an index) and stores new wallet
+state, such as a resumable recovery, that older SDKs don't understand: don't
+reopen a 0.12.0 database with an older SDK. RegTest runs the 0.9.0 server.
 A 0.9.0 server refuses arkoor payments with an output below 330 sats from
 Bark 0.8.1 and older, so update apps before the server.
 
@@ -22,7 +23,10 @@ Bark 0.8.1 and older, so update apps before the server.
   `Wallet::board_psbt(psbt_base64, funding)` takes that record instead of
   `keypair_index` and `expiry_height`. Persist the record and fund it
   immediately. `board_psbt` refuses a funding address with too few blocks left
-  to confirm and register before it expires.
+  to confirm and register before it expires (more than `vtxo_exit_margin` plus
+  the server's required board confirmations). `prepare_board` refuses a
+  `board_lifetime` that short, and `submit_prepared_board` returns
+  `PreparedBoardChanged` once a proposal ages into that window.
 - Boards, including prepared boards, now expire `Config::board_lifetime`
   blocks after the tip: 432 (3 days) on mainnet, 4320 elsewhere, capped at
   the server's VTXO lifetime. They used to get the server's full VTXO lifetime.
@@ -32,12 +36,13 @@ Bark 0.8.1 and older, so update apps before the server.
   no longer broadcasts a child for a confirmed exit transaction.
 - `RecoveryStatus::InProgress { report }` is new: seed recovery stopped with
   VTXOs it couldn't decide yet. They stay locked and every sync resumes the
-  recovery. `recovery_report()` returns its report too.
+  recovery. `recovery_report()` stays `None` for it; `pending_recovery()` has
+  the report so far.
 - `RecoveryReport.abandoned` is new: VTXOs Bark gave up on after 40
   undecided attempts. `is_complete` also requires it to be empty.
 - `CpfpParams` (callback onchain wallets): for `Rbf`, `current_package_fee_sats`
-  is replaced by `replaced_fee_sats`, `replaced_fee_rate_sat_per_vb`,
-  `incremental_relay_fee_sat_per_vb` and `parent_in_mempool`, Bark's new
+  is replaced by `replaced_fee_sats`, `replaced_fee_rate_sat_per_kwu`,
+  `incremental_relay_fee_sat_per_kwu` and `parent_in_mempool`, Bark's new
   replacement rules. The replacement pays at least the replaced fee plus the
   incremental relay fee over its own weight, at a feerate above the replaced
   one by the incremental relay fee.

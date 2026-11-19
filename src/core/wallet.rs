@@ -248,8 +248,8 @@ impl Wallet {
     }
 
     /// The report of the seed-recovery scan that ran during [`Self::open`],
-    /// or `None` if the scan never produced one. Use [`Self::recovery_status`]
-    /// to tell a scan that failed apart from one that never ran.
+    /// or `None` if it did not run to the end. Use [`Self::recovery_status`]
+    /// to tell a scan that failed or is in progress apart from one that never ran.
     pub fn recovery_report(&self) -> Option<types::RecoveryReport> {
         self.recovery_status.report().cloned()
     }

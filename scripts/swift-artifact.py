@@ -6,6 +6,7 @@ import json
 import os
 from pathlib import Path
 import plistlib
+import re
 import shutil
 import subprocess
 import tempfile
@@ -130,8 +131,11 @@ def stage():
     package = package.replace('path: "sdk/swift/BarkBoltFFI.xcframework"',
         'url: "https://github.com/smolcars/bark-bolt-ffi/releases/download/v' + version + '/BarkBoltFFI.xcframework.zip", checksum: "' + archive_hash + '"')
     (ROOT / 'Package.swift').write_text(package + '\n')
+    # The pinned Bark crate, so provenance can't go stale on the next upgrade.
+    bark = re.search(r'name = "bark-wallet"\nversion = "([^"]+)"\nsource = "[^"]*#([0-9a-f]{40})"',
+                     (ROOT / 'Cargo.lock').read_text())
     (SDK / 'provenance.json').write_text(json.dumps({
-        'version': version, 'bark': '0.8.1', 'bark_revision': '303682063ed7559b06dcf37c5cb37bb7037b943f', 'boltffi': '0.31.1',
+        'version': version, 'bark': bark[1], 'bark_revision': bark[2], 'boltffi': '0.31.1',
         'rust': '1.99.1', 'minimum_ios': '16.0', 'minimum_macos': '13.0', 'profile': 'release', 'archive_sha256': archive_hash, 'source_sha256': source_digest(),
         'files': artifacts(), 'package_sha256': checksum(ROOT / 'Package.swift'),
     }, indent=2, sort_keys=True) + '\n')

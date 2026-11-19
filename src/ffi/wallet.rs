@@ -814,9 +814,10 @@ impl Wallet {
 
     /// Outcome of the seed-recovery scan that ran during `Wallet::open`.
     ///
-    /// Recovery only runs on the open that creates the wallet locally, and not
-    /// at all when `WalletOpenArgs.skip_recovery` is set, so this is `NotRun`
-    /// on every subsequent open. `Failed` means the scan errored before
+    /// Recovery starts on the open that creates the wallet locally, unless
+    /// `WalletOpenArgs.skip_recovery` is set. A later open is `NotRun`, or
+    /// `InProgress` while a started recovery isn't done (even with
+    /// `skip_recovery`). `Failed` means the scan errored before
     /// producing a report — bark logs that and lets open succeed — so funds
     /// may be missing until a retry; `InProgress` means VTXOs are still
     /// undecided and every sync resumes the recovery; `Completed` carries the report, and
@@ -827,8 +828,8 @@ impl Wallet {
     }
 
     /// The report of the seed-recovery scan that ran during `Wallet::open`, or
-    /// none if the scan never produced one. Use `recovery_status` to tell a scan
-    /// that failed apart from one that never ran.
+    /// none if it did not run to the end. Use `recovery_status` to tell a scan
+    /// that failed or is in progress apart from one that never ran.
     pub fn recovery_report(&self) -> Option<types::RecoveryReport> {
         self.core.recovery_report()
     }

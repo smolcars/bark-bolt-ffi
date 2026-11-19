@@ -520,7 +520,7 @@ A funding address handed out by an older SDK can be rebuilt as
 (432 on mainnet). `ExitTxStatus.confirmed` only carries `block`.
 `RecoveryStatus` adds `inProgress(report)` and `RecoveryReport` adds
 `abandoned`. Callback onchain wallets read `CpfpParams.replacedFeeSats`,
-`replacedFeeRateSatPerVb`, `incrementalRelayFeeSatPerVb` and
+`replacedFeeRateSatPerKwu`, `incrementalRelayFeeSatPerKwu` and
 `parentInMempool` for `Rbf`. Update apps before servers move to 0.9.0. See
 [CHANGELOG.md](../CHANGELOG.md#0120).
 

@@ -339,8 +339,8 @@ impl OnchainWalletTrait for CallbackWalletAdapter {
             fees_type: "Effective".to_string(),
             effective_fee_rate_sat_per_vb: fees.effective().to_sat_per_vb_ceil(),
             replaced_fee_sats: None,
-            replaced_fee_rate_sat_per_vb: None,
-            incremental_relay_fee_sat_per_vb: None,
+            replaced_fee_rate_sat_per_kwu: None,
+            incremental_relay_fee_sat_per_kwu: None,
             parent_in_mempool: None,
         };
         if let MakeCpfpFees::Rbf {
@@ -353,9 +353,8 @@ impl OnchainWalletTrait for CallbackWalletAdapter {
         {
             params.fees_type = "Rbf".to_string();
             params.replaced_fee_sats = Some(replaced_fee.to_sat());
-            params.replaced_fee_rate_sat_per_vb = Some(replaced_fee_rate.to_sat_per_vb_ceil());
-            params.incremental_relay_fee_sat_per_vb =
-                Some(incremental_relay_fee.to_sat_per_vb_ceil());
+            params.replaced_fee_rate_sat_per_kwu = Some(replaced_fee_rate.to_sat_per_kwu());
+            params.incremental_relay_fee_sat_per_kwu = Some(incremental_relay_fee.to_sat_per_kwu());
             params.parent_in_mempool = Some(parent_in_mempool);
         }
 

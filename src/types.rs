@@ -1704,7 +1704,7 @@ impl From<&bark::RecoveryReport> for RecoveryReport {
 /// `bark::RecoveryStatus`.
 ///
 /// The variants are distinguishable on purpose: `NotRun` means nothing was
-/// attempted (wallet already existed locally without a recovery in progress,
+/// attempted (no recovery in progress, and the wallet already existed locally
 /// or `skip_recovery` was set), `Failed` means the scan errored before
 /// producing a report so funds may be missing until a retry succeeds,
 /// `InProgress` means it stopped with VTXOs still undecided (they stay locked
@@ -1728,10 +1728,11 @@ pub enum RecoveryStatus {
 }
 
 impl RecoveryStatus {
-    /// The report, if the scan completed or stopped in progress.
+    /// The report, if the scan ran to the end. An `InProgress` report can
+    /// still change, so it isn't one.
     pub fn report(&self) -> Option<&RecoveryReport> {
         match self {
-            Self::Completed { report } | Self::InProgress { report } => Some(report),
+            Self::Completed { report } => Some(report),
             _ => None,
         }
     }
@@ -1899,10 +1900,10 @@ pub struct CpfpParams {
     /// least `replaced_fee_sats` plus the incremental relay fee over its own
     /// weight, at a feerate above the replaced one by the incremental relay fee.
     /// The replacement is the child, or the whole package if the parent isn't
-    /// in the mempool. Rates are rounded up.
+    /// in the mempool. Rates are exact, in sat/kwu (sat/vB × 250).
     pub replaced_fee_sats: Option<u64>,
-    pub replaced_fee_rate_sat_per_vb: Option<u64>,
-    pub incremental_relay_fee_sat_per_vb: Option<u64>,
+    pub replaced_fee_rate_sat_per_kwu: Option<u64>,
+    pub incremental_relay_fee_sat_per_kwu: Option<u64>,
     pub parent_in_mempool: Option<bool>,
 }
 
