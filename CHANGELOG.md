@@ -26,7 +26,9 @@ Bark 0.8.1 and older, so update apps before the server.
   to confirm and register before it expires (more than `vtxo_exit_margin` plus
   the server's required board confirmations). `prepare_board` refuses a
   `board_lifetime` that short, and `submit_prepared_board` returns
-  `PreparedBoardChanged` once a proposal ages into that window.
+  `PreparedBoardChanged` once a proposal ages into that window. Board any
+  funding address an older SDK handed out before upgrading if it is that close
+  to its expiry.
 - Boards, including prepared boards, now expire `Config::board_lifetime`
   blocks after the tip: 432 (3 days) on mainnet, 4320 elsewhere, capped at
   the server's VTXO lifetime. They used to get the server's full VTXO lifetime.
@@ -40,7 +42,9 @@ Bark 0.8.1 and older, so update apps before the server.
   the report so far.
 - `RecoveryReport.abandoned` is new: VTXOs Bark gave up on after 40
   undecided attempts. `is_complete` also requires it to be empty.
-- `CpfpParams` (callback onchain wallets): for `Rbf`, `current_package_fee_sats`
+- `CpfpParams` (callback onchain wallets): `effective_fee_rate_sat_per_vb`
+  (rounded up) is now `effective_fee_rate_sat_per_kwu` (exact). For `Rbf`,
+  `current_package_fee_sats`
   is replaced by `replaced_fee_sats`, `replaced_fee_rate_sat_per_kwu`,
   `incremental_relay_fee_sat_per_kwu` and `parent_in_mempool`, Bark's new
   replacement rules. The replacement pays at least the replaced fee plus the

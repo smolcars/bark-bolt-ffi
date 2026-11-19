@@ -516,10 +516,14 @@ val board = wallet.boardPsbt(psbt, funding)
 ```
 
 A funding address handed out by an older SDK can be rebuilt as
-`BoardFundingAddress(address, userPubkey: peekPublicKey(keypairIndex), expiryHeight)`. Boards now default to `Config.boardLifetime` blocks
+`BoardFundingAddress(address, userPubkey: peekPublicKey(keypairIndex), expiryHeight)`.
+`boardPsbt` refuses one with `vtxoExitMargin` plus the server's required board
+confirmations or fewer blocks left, so board outstanding funding addresses
+near expiry before upgrading. Boards now default to `Config.boardLifetime` blocks
 (432 on mainnet). `ExitTxStatus.confirmed` only carries `block`.
 `RecoveryStatus` adds `inProgress(report)` and `RecoveryReport` adds
-`abandoned`. Callback onchain wallets read `CpfpParams.replacedFeeSats`,
+`abandoned`. Callback onchain wallets read the exact `CpfpParams.effectiveFeeRateSatPerKwu`
+(was the rounded-up `effectiveFeeRateSatPerVb`), and `replacedFeeSats`,
 `replacedFeeRateSatPerKwu`, `incrementalRelayFeeSatPerKwu` and
 `parentInMempool` for `Rbf`. Update apps before servers move to 0.9.0. See
 [CHANGELOG.md](../CHANGELOG.md#0120).

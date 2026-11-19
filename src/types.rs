@@ -1895,7 +1895,8 @@ impl From<&bark_bitcoin_ext::BlockRef> for BlockRef {
 pub struct CpfpParams {
     pub tx_hex: String,
     pub fees_type: String,
-    pub effective_fee_rate_sat_per_vb: u64,
+    /// The package's target effective fee rate, exact, in sat/kwu (sat/vB × 250).
+    pub effective_fee_rate_sat_per_kwu: u64,
     /// `Rbf` only, as in Bark's `MakeCpfpFees::Rbf`: the replacement pays at
     /// least `replaced_fee_sats` plus the incremental relay fee over its own
     /// weight, at a feerate above the replaced one by the incremental relay fee.

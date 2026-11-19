@@ -92,8 +92,9 @@ through Bark's serde form since Bark's type has private fields.
 record. `src/types.rs` drops `ExitTxStatus::Confirmed`'s `child_txid`/`origin`,
 adds `RecoveryStatus::InProgress`, `RecoveryReport.abandoned` and Bark's new
 RBF fields on `CpfpParams`. `Config.board_lifetime` and
-`Wallet.pending_recovery` are new. Bark's migration m0043 makes databases
-forward-only. RegTest moves to our `captaind`/`bark` `nightly-2026-11-19`
+`Wallet.pending_recovery` are new. Bark 0.9.0 stores state (migration m0043,
+resumable recovery) that older SDKs don't understand, so docs warn against
+reopening with one. RegTest moves to our `captaind`/`bark` `nightly-2026-11-19`
 images (bark-docker-images, built from the `bark-0.9.0` tag commit `c84367fe`);
 CLN and its hold plugin are unchanged upstream.
 

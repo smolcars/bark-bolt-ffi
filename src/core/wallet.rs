@@ -236,11 +236,13 @@ impl Wallet {
     /// Outcome of the seed-recovery mailbox scan that ran during
     /// [`Self::open`].
     ///
-    /// Recovery only runs on the open that creates the wallet locally, and not
-    /// at all when `OpenArgs::skip_recovery` is set, so this is `NotRun` on
-    /// every subsequent open. `Failed` means the scan errored before producing
+    /// Recovery starts on the open that creates the wallet locally, unless
+    /// `OpenArgs::skip_recovery` is set. A later open is `NotRun`, or
+    /// `InProgress` while a started recovery isn't done (even with
+    /// `skip_recovery`). `Failed` means the scan errored before producing
     /// a report — upstream logs that and lets open succeed — so funds may be
-    /// missing until a retry; `Completed` carries the report, and a report
+    /// missing until a retry; `InProgress` resumes on every sync;
+    /// `Completed` carries the report, and a report
     /// with `is_complete == false` means funds may still be missing. Retry
     /// `failed` ids with [`Self::recover_vtxos`].
     pub fn recovery_status(&self) -> types::RecoveryStatus {

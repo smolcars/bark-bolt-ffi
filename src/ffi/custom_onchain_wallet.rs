@@ -337,7 +337,7 @@ impl OnchainWalletTrait for CallbackWalletAdapter {
         let mut params = CpfpParams {
             tx_hex,
             fees_type: "Effective".to_string(),
-            effective_fee_rate_sat_per_vb: fees.effective().to_sat_per_vb_ceil(),
+            effective_fee_rate_sat_per_kwu: fees.effective().to_sat_per_kwu(),
             replaced_fee_sats: None,
             replaced_fee_rate_sat_per_kwu: None,
             incremental_relay_fee_sat_per_kwu: None,
