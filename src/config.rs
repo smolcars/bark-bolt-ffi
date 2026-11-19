@@ -32,6 +32,11 @@ pub struct Config {
     #[boltffi::default(None)]
     pub htlc_recv_claim_delta: Option<u16>,
 
+    /// Blocks from the tip until a new board's VTXO expires, capped at the
+    /// server's VTXO lifetime. Default: 432 (3 days) on mainnet, 4320 elsewhere.
+    #[boltffi::default(None)]
+    pub board_lifetime: Option<u16>,
+
     #[boltffi::default(None)]
     pub fallback_fee_rate: Option<u64>,
 
@@ -98,6 +103,9 @@ impl Config {
         if let Some(delta) = self.htlc_recv_claim_delta {
             ret.htlc_recv_claim_delta = delta.into();
         }
+        if let Some(lifetime) = self.board_lifetime {
+            ret.board_lifetime = lifetime.into();
+        }
         if let Some(rate) = self.fallback_fee_rate {
             ret.fallback_fee_rate = Some(bitcoin::FeeRate::from_sat_per_kwu(rate));
         }
@@ -156,6 +164,7 @@ mod tests {
             vtxo_refresh_expiry_threshold: None,
             vtxo_exit_margin: None,
             htlc_recv_claim_delta: None,
+            board_lifetime: None,
             fallback_fee_rate: None,
             round_tx_required_confirmations: None,
             daemon_sync_interval_secs: None,
@@ -171,6 +180,16 @@ mod tests {
     fn unset_gap_limit_keeps_the_upstream_default() {
         let cfg = minimal().into_bark(bitcoin::Network::Regtest).unwrap();
         assert_eq!(cfg.vtxo_key_gap_limit, bark::DEFAULT_VTXO_KEY_GAP_LIMIT);
+    }
+
+    #[test]
+    fn board_lifetime_is_forwarded_or_defaults() {
+        let cfg = minimal().into_bark(bitcoin::Network::Bitcoin).unwrap();
+        assert_eq!(u32::from(cfg.board_lifetime), 432);
+        let mut config = minimal();
+        config.board_lifetime = Some(144);
+        let cfg = config.into_bark(bitcoin::Network::Bitcoin).unwrap();
+        assert_eq!(u32::from(cfg.board_lifetime), 144);
     }
 
     #[test]

@@ -6,6 +6,62 @@ Names use the Rust spelling: Swift lowercases the first letter
 SCREAMING_SNAKE enum constants (`BarkErrorCode.EXIT_NON_STANDARD_VTXO`) and
 class names for variants (`BroadcastOutcome.Uncertain`).
 
+## 0.12.0
+
+Bark moves to lib-0.9.0 (`bee6aeae`). This release breaks the API: it follows
+Bark's new board funding model and drops removed fields, with no compatibility
+shims. Bark 0.9.0 adds wallet migration m0043 (an index), so a database opened
+by 0.12.0 can't go back to an older SDK. RegTest runs the 0.9.0 server.
+A 0.9.0 server refuses arkoor payments with an output below 330 sats from
+Bark 0.8.1 and older, so update apps before the server.
+
+### Breaking changes
+
+- `Wallet::board_funding_address() -> BoardFundingAddress { address,
+  user_pubkey, expiry_height }` replaces `BoardFundingInfo`, and
+  `Wallet::board_psbt(psbt_base64, funding)` takes that record instead of
+  `keypair_index` and `expiry_height`. Persist the record and fund it
+  immediately. `board_psbt` refuses a funding address with too few blocks left
+  to confirm and register before it expires.
+- Boards, including prepared boards, now expire `Config::board_lifetime`
+  blocks after the tip: 432 (3 days) on mainnet, 4320 elsewhere, capped at
+  the server's VTXO lifetime. They used to get the server's full VTXO lifetime.
+- `ExitTxStatus::Confirmed` has only `block`, the block that confirmed the exit
+  transaction itself; `child_txid` and `origin` are gone. Bark now continues
+  an exit whose transaction confirms without, or before, its CPFP child, and
+  no longer broadcasts a child for a confirmed exit transaction.
+- `RecoveryStatus::InProgress { report }` is new: seed recovery stopped with
+  VTXOs it couldn't decide yet. They stay locked and every sync resumes the
+  recovery. `recovery_report()` returns its report too.
+- `RecoveryReport.abandoned` is new: VTXOs Bark gave up on after 40
+  undecided attempts. `is_complete` also requires it to be empty.
+- `CpfpParams` (callback onchain wallets): for `Rbf`, `current_package_fee_sats`
+  is replaced by `replaced_fee_sats`, `replaced_fee_rate_sat_per_vb`,
+  `incremental_relay_fee_sat_per_vb` and `parent_in_mempool`, Bark's new
+  replacement rules. The replacement pays at least the replaced fee plus the
+  incremental relay fee over its own weight, at a feerate above the replaced
+  one by the incremental relay fee.
+
+### New
+
+- `Config::board_lifetime` (blocks) sets the default board expiry.
+- `Wallet::pending_recovery() -> RecoveryReport?` reports a seed recovery
+  still in progress, or none once it is done.
+
+### Fixes from Bark 0.9.0
+
+- Bark checks that the unlock hash of its forfeits matches the one locking its
+  new VTXOs (a reported vulnerability).
+- A retried failed Lightning payment gets its own movement, and a Lightning
+  send that fails during HTLC cosigning is handled.
+- The daemon detects VTXOs force-exited by another party on every sync, not
+  only at start.
+- Arkoor payments put every output below 330 sats in the dust isolation
+  transaction.
+- A refresh takes at most the 1000 VTXOs that expire first.
+
+Not exposed: Bark's Nostr Wallet Connect (`nwc` feature).
+
 ## 0.11.0
 
 Bark moves to lib-0.8.1 (`30368206`). Adds three `Wallet` methods, ten

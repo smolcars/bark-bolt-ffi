@@ -877,21 +877,42 @@ impl From<BarkPendingBoard> for PendingBoard {
 }
 
 // ============================================================================
-// BoardFundingInfo
+// BoardFundingAddress
 // ============================================================================
 
-/// Destination for an externally funded board (e.g. a payjoin receive).
+/// Destination for an externally funded board (e.g. a payjoin receive),
+/// Bark's `BoardFundingAddress`.
 ///
-/// The funding script commits to the derived keypair and expiry height, so
-/// `keypair_index` and `expiry_height` must be passed back unchanged to
-/// `board_psbt` once the funding PSBT is available — including on retries
-/// after the sender changes the transaction.
-#[derive(Clone, Debug, Serialize, Deserialize)]
+/// Persist it and pass it back unchanged to `board_psbt` once the funding
+/// PSBT is available, including on retries after the sender changes the
+/// transaction. Fund it immediately: the VTXO's lifetime started when it was
+/// made, and once it expires the server can sweep the funding output.
+#[derive(Clone, Debug, PartialEq, Eq, Serialize, Deserialize)]
 #[boltffi::data]
-pub struct BoardFundingInfo {
+pub struct BoardFundingAddress {
     pub address: String,
+    /// Hex public key of the wallet key the board commits to.
+    pub user_pubkey: String,
     pub expiry_height: u32,
-    pub keypair_index: u32,
+}
+
+// Bark's type has private fields and no constructor, only serde, which shares
+// these field names.
+impl From<&bark::BoardFundingAddress> for BoardFundingAddress {
+    fn from(funding: &bark::BoardFundingAddress) -> Self {
+        serde_json::from_value(serde_json::to_value(funding).expect("serializable"))
+            .expect("Bark's BoardFundingAddress fields changed")
+    }
+}
+
+impl TryFrom<&BoardFundingAddress> for bark::BoardFundingAddress {
+    type Error = crate::error::BarkError;
+
+    fn try_from(funding: &BoardFundingAddress) -> Result<Self, Self::Error> {
+        serde_json::to_value(funding)
+            .and_then(serde_json::from_value)
+            .map_err(|e| format!("invalid board funding address: {e}").into())
+    }
 }
 
 // ============================================================================
@@ -1141,12 +1162,8 @@ pub enum ExitTxStatus {
         child_txid: String,
         origin: ExitTxOrigin,
     },
-    /// Confirmed in a block.
-    Confirmed {
-        child_txid: String,
-        block: BlockRef,
-        origin: ExitTxOrigin,
-    },
+    /// The exit transaction itself confirmed in `block`, with or without a CPFP child.
+    Confirmed { block: BlockRef },
 }
 
 impl From<&bark::exit::ExitTxStatus> for ExitTxStatus {
@@ -1164,14 +1181,8 @@ impl From<&bark::exit::ExitTxStatus> for ExitTxStatus {
                 child_txid: child_txid.to_string(),
                 origin: origin.into(),
             },
-            B::Confirmed {
-                child_txid,
-                block,
-                origin,
-            } => Self::Confirmed {
-                child_txid: child_txid.to_string(),
+            B::Confirmed { block } => Self::Confirmed {
                 block: block.into(),
-                origin: origin.into(),
             },
         }
     }
@@ -1656,7 +1667,10 @@ pub struct RecoveryReport {
     pub failed: RecoveryBucket,
     /// Already fully exited on-chain.
     pub exited: RecoveryBucket,
-    /// Whether the scan accounted for every VTXO: no `failed`, no `foreign`.
+    /// Given up on after Bark's 40 undecided attempts. One whose body is
+    /// stored stays locked, and a later recovery tries it again.
+    pub abandoned: RecoveryBucket,
+    /// Whether the scan accounted for every VTXO: no `failed`, `abandoned` or `foreign`.
     pub is_complete: bool,
 }
 
@@ -1680,6 +1694,7 @@ impl From<&bark::RecoveryReport> for RecoveryReport {
             foreign: r.foreign().into(),
             failed: r.failed().into(),
             exited: r.exited().into(),
+            abandoned: r.abandoned().into(),
             is_complete: r.is_complete(),
         }
     }
@@ -1688,13 +1703,15 @@ impl From<&bark::RecoveryReport> for RecoveryReport {
 /// Outcome of the seed-recovery scan `Wallet::open` runs, mirroring
 /// `bark::RecoveryStatus`.
 ///
-/// The three variants are distinguishable on purpose: `NotRun` means nothing
-/// was attempted (wallet already existed locally, or `skip_recovery` was set),
-/// `Failed` means the scan errored before producing a report so funds may be
-/// missing until a retry succeeds, and `Completed` carries the report — whose
-/// `is_complete` can still be `false` for individual VTXOs.
+/// The variants are distinguishable on purpose: `NotRun` means nothing was
+/// attempted (wallet already existed locally without a recovery in progress,
+/// or `skip_recovery` was set), `Failed` means the scan errored before
+/// producing a report so funds may be missing until a retry succeeds,
+/// `InProgress` means it stopped with VTXOs still undecided (they stay locked
+/// and every sync resumes the recovery), and `Completed` carries the report —
+/// whose `is_complete` can still be `false` for individual VTXOs.
 ///
-/// Serde tags: `"not-run"` | `"failed"` | `"completed"`.
+/// Serde tags: `"not-run"` | `"failed"` | `"in-progress"` | `"completed"`.
 #[derive(Clone, Debug, Serialize, Deserialize)]
 #[serde(tag = "type", rename_all = "kebab-case")]
 #[boltffi::data]
@@ -1703,15 +1720,18 @@ pub enum RecoveryStatus {
     NotRun,
     /// The scan errored before it could produce a report.
     Failed { message: String },
+    /// The scan stopped before it was done; every sync resumes it. The report
+    /// holds what it decided so far.
+    InProgress { report: RecoveryReport },
     /// The scan ran to the end.
     Completed { report: RecoveryReport },
 }
 
 impl RecoveryStatus {
-    /// The report, if the scan completed.
+    /// The report, if the scan completed or stopped in progress.
     pub fn report(&self) -> Option<&RecoveryReport> {
         match self {
-            Self::Completed { report } => Some(report),
+            Self::Completed { report } | Self::InProgress { report } => Some(report),
             _ => None,
         }
     }
@@ -1724,6 +1744,9 @@ impl From<bark::RecoveryStatus> for RecoveryStatus {
             // Alternate form joins the anyhow cause chain on one line.
             bark::RecoveryStatus::Failed(e) => Self::Failed {
                 message: format!("{:#}", e),
+            },
+            bark::RecoveryStatus::InProgress(r) => Self::InProgress {
+                report: (&r).into(),
             },
             bark::RecoveryStatus::Completed(r) => Self::Completed {
                 report: (&r).into(),
@@ -1872,7 +1895,15 @@ pub struct CpfpParams {
     pub tx_hex: String,
     pub fees_type: String,
     pub effective_fee_rate_sat_per_vb: u64,
-    pub current_package_fee_sats: Option<u64>,
+    /// `Rbf` only, as in Bark's `MakeCpfpFees::Rbf`: the replacement pays at
+    /// least `replaced_fee_sats` plus the incremental relay fee over its own
+    /// weight, at a feerate above the replaced one by the incremental relay fee.
+    /// The replacement is the child, or the whole package if the parent isn't
+    /// in the mempool. Rates are rounded up.
+    pub replaced_fee_sats: Option<u64>,
+    pub replaced_fee_rate_sat_per_vb: Option<u64>,
+    pub incremental_relay_fee_sat_per_vb: Option<u64>,
+    pub parent_in_mempool: Option<bool>,
 }
 
 // ============================================================================
@@ -1912,6 +1943,24 @@ impl From<bark::WalletNotification> for WalletNotification {
 #[cfg(test)]
 mod tests {
     use super::*;
+
+    #[test]
+    fn board_funding_address_round_trips_through_bark() {
+        let funding = BoardFundingAddress {
+            address: "bcrt1qw508d6qejxtdg4y5r3zarvary0c5xw7kygt080".to_owned(),
+            user_pubkey: "0279be667ef9dcbbac55a06295ce870b07029bfcdb2dce28d959f2815b16f81798"
+                .to_owned(),
+            expiry_height: 1234,
+        };
+        let bark_funding = bark::BoardFundingAddress::try_from(&funding).unwrap();
+        assert_eq!(bark_funding.expiry_height(), 1234.into());
+        assert_eq!(BoardFundingAddress::from(&bark_funding), funding);
+        let bad = BoardFundingAddress {
+            user_pubkey: "zz".to_owned(),
+            ..funding
+        };
+        assert!(bark::BoardFundingAddress::try_from(&bad).is_err());
+    }
 
     #[test]
     fn import_vtxo_args_default_to_upstream_defaults() {

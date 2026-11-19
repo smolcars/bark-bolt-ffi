@@ -33,8 +33,8 @@ services:
       timeout: 3s
       retries: 60
   captaind:
-    # Reports 0.8.1+303682063ed7 (the lib-0.8.1 tag).
-    image: niteshbalusu/captaind:nightly-2026-11-06@sha256:086ea30166e8add6846ec2b9179ad44c25ce15d8defd5de3825cea0ba39c8b01
+    # Built from c84367fe (the bark-0.9.0 tag; server code as server-0.9.0).
+    image: niteshbalusu/captaind:nightly-2026-11-19@sha256:ec32ee1880265dc2d0ec4684ae5b4fb5929a2f437572a9437002af0fb93e8acc
     environment: { CAPTAIND_CONFIG_PATH: /config/captaind.toml }
     volumes: [server:/data/captaind, cln:/data/cln, "./captaind.toml:/config/captaind.toml:ro"]
     ports: ["127.0.0.1:${ARK_PORT:-3635}:3535"]
@@ -42,7 +42,7 @@ services:
       postgres: {condition: service_healthy}
       cln: {condition: service_healthy}
   bark:
-    image: niteshbalusu/bark:nightly-2026-11-06@sha256:a87c65526943916a63aba4df1778dd5d99fbf57caa829aa8cd02b52017602257
+    image: niteshbalusu/bark:nightly-2026-11-19@sha256:dde5f8e29435c37dc016367bb9ac95f951cd2cb549cc499b4b85d30944d8e907
     entrypoint: [bark]
     profiles: [cli]
     volumes: [wallets:/wallets]

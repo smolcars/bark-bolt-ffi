@@ -79,6 +79,31 @@ different claims. Record them separately; do not mark one from evidence of anoth
 
 ## Tasks
 
+### 34 — Bark 0.9.0 (v0.12.0, breaking)
+
+Plan: pin the four Bark crates to lib-0.9.0 (`bee6aeae`). Breaking SDK changes
+are wanted, with no compatibility shims. `src/core/wallet.rs` and
+`src/ffi/wallet.rs` take Bark's `BoardFundingAddress` model:
+`board_funding_address` returns the `BoardFundingAddress` record (built with
+`wallet.board().funding_address()`) and `board_psbt` takes it back, converted
+through Bark's serde form since Bark's type has private fields.
+`src/core/prepared_board.rs` uses Bark's default board expiry
+(`board_lifetime` capped at the server's VTXO lifetime) and builds the same
+record. `src/types.rs` drops `ExitTxStatus::Confirmed`'s `child_txid`/`origin`,
+adds `RecoveryStatus::InProgress`, `RecoveryReport.abandoned` and Bark's new
+RBF fields on `CpfpParams`. `Config.board_lifetime` and
+`Wallet.pending_recovery` are new. Bark's migration m0043 makes databases
+forward-only. RegTest moves to our `captaind`/`bark` `nightly-2026-11-19`
+images (bark-docker-images, built from the `bark-0.9.0` tag commit `c84367fe`);
+CLN and its hold plugin are unchanged upstream.
+
+- [x] Build and existing unit tests; config and `BoardFundingAddress` conversion unit tests.
+- [x] Live RegTest Rust suite, including a new externally funded board through `BoardFundingAddress` and its default expiry.
+- [x] Live Swift and Kotlin (JVM and packaged) contract tests against a fresh local SDK build.
+- [ ] Review, PR CI, main CI, staging and publication of v0.12.0.
+
+[Execution evidence](validation/bark-090-2026-11-19.md).
+
 ### 33 — Rust and Android compilation on the Linux runner pool
 
 **Engineering plan and affected paths:** [Android runner migration](plans/33-android-build-runner.md),
